@@ -3,4 +3,4 @@
 	{% include 'attendance/qr/_navbar_lang.html' %}
 	lalu set ATTENDANCE_LANG_IN_NAVBAR = True di settings.py agar bendera tidak tampil dua kali.
 	Berkas CSS dimuat di sini supaya bendera rapi juga di halaman yang bukan halaman absensi QR.
-{% endcomment %}<li class="nav-item qr-navbar-lang"><link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">{% flags 'link' %}</li>
+{% endcomment %}<li class="nav-item qr-navbar-lang"><link rel="stylesheet" href="{% qr_static 'attendance/qr/qr.css' %}">{% flags 'link' %}</li>

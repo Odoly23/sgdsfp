@@ -2,17 +2,14 @@
 {% load qr_i18n %}
 {% block qr_body %}
 <p class="text-muted">{% t 'dev.sub' %}</p>
-{% if new_key %}
-<div class="alert alert-warning">
-	<b>{% t 'dev.new_title' name=new_device.name %}</b>
-	<div class="qr-key mt-2">{{ new_key }}</div>
-	<small class="d-block mt-2">{% t 'dev.new_note' %}</small>
+<div class="alert {% if this_device %}alert-success{% else %}alert-warning{% endif %} p-2">
+	{% if this_device %}{% t 'dev.this_yes' name=this_device.name %}{% else %}{% t 'dev.this_no' %}{% endif %}
 </div>
-{% endif %}
-<h5>{% t 'dev.add_title' %}</h5>
-<form method="post" action="{% url 'qr-device-add' %}" class="qr-form mb-4">{% csrf_token %}
-	<input id="dev-name" class="form-control" type="text" name="name" aria-label="{% t 'dev.name_label' %}" placeholder="{% t 'dev.name_ph' %}" required>
-	<button class="btn btn-mdi" type="submit">{% t 'dev.make' %}</button>
+<h5>{% t 'dev.pair_title' %}</h5>
+<p class="text-muted">{% t 'dev.pair_desc' %}</p>
+<form method="post" action="{% url 'qr-device-pair' %}" class="qr-form mb-4">{% csrf_token %}
+	<input class="form-control" type="text" name="name" maxlength="100" aria-label="{% t 'dev.pair_name' %}" placeholder="{% t 'dev.pair_name' %}">
+	<button class="btn btn-mdi" type="submit">{% t 'dev.pair_btn' %} <i class="fa fa-desktop"></i></button>
 </form>
 <h5>{% t 'dev.list_title' %}</h5>
 <table class="table table-sm table-striped qr-stack">

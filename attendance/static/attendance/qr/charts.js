@@ -6,7 +6,11 @@
 	var blocks = root.querySelectorAll('.qr-chart');
 	var COLORS = { present: '#1f9d55', late: '#d98e04', leave: '#2563eb', absent: '#8b1a1a' };
 
-	function message(el, text) { el.style.height = 'auto'; el.innerHTML = '<p class="text-muted mb-0">' + text + '</p>'; }
+	function message(el, text) {
+		var p = document.createElement('p');
+		p.className = 'text-muted mb-0'; p.textContent = text;
+		el.style.height = 'auto'; el.replaceChildren(p);
+	}
 	if (!window.Highcharts) { blocks.forEach(function (b) { message(b, root.dataset.na); }); return; }
 
 	var base = {

@@ -47,4 +47,12 @@
 	</tbody>
 </table>
 {% endblock %}
-{% block qr_scripts %}<script>setTimeout(function(){ location.reload(); }, 30000);</script>{% endblock %}
+{% block qr_scripts %}<script>
+/* segarkan tiap 60 detik, tetapi hanya saat tab terlihat: tab yang terlupakan tidak membebani server */
+(function () {
+	var t;
+	function arm() { clearTimeout(t); t = setTimeout(function () { if (document.hidden) arm(); else location.reload(); }, 60000); }
+	arm();
+	document.addEventListener('visibilitychange', function () { if (!document.hidden) arm(); });
+})();
+</script>{% endblock %}

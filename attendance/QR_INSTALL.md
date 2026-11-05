@@ -14,7 +14,9 @@ attendance/qr_i18n.py          semua teks 4 bahasa (Tetun, English, Indonesia, P
 attendance/views_qr.py         halaman kiosk, hari ini, kartu, perangkat, rekap, ganti bahasa
 attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
-attendance/tests_qr.py         108 tes otomatis
+attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
+attendance/management/commands/prune_scanlogs.py   pembersih log scan
+attendance/tests_qr.py         145 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -47,21 +49,27 @@ Migrasi hanya membuat 4 tabel baru. Kolom di tabel `Attendance` yang ada tidak d
 
 ```python
 ATTENDANCE_QR_SECRET = os.environ['ATTENDANCE_QR_SECRET']   # kunci tanda tangan QR, lihat catatan
-ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']           # jaringan kantor; kosong = dari mana saja
 ATTENDANCE_TIME_ZONE = 'Asia/Dili'      # zona waktu absensi saja; TIME_ZONE proyek tidak diubah
 ATTENDANCE_DEFAULT_LANG = 'tet'         # tet | en | id | pt
 ATTENDANCE_LANG_IN_NAVBAR = False       # True setelah bendera ditempel di navbar (bagian 4)
+# --- keamanan (bawaan sudah ketat; ubah hanya bila perlu)
+# ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']   # bawaan: semua jaringan privat. [] = TERBUKA (tidak aman)
+# ATTENDANCE_REQUIRE_DEVICE_KEY = True    # scan hanya dari PC yang dipasangkan admin (bawaan True)
+# ATTENDANCE_ALLOW_CAMERA = False         # kamera cadangan di kiosk (bawaan mati: hanya alat pembaca QR)
+# ATTENDANCE_TRUST_PROXY_HEADER = True    # WAJIB True bila server di belakang Nginx/proxy tepercaya
+# ATTENDANCE_THROTTLE_PER_MINUTE = 60     # batas scan per alamat IP per menit
+# --- kecepatan
+# ATTENDANCE_REPORT_CACHE_SECONDS = 60    # cache dashboard/rekap seluruh pegawai (0 = mati)
+# ATTENDANCE_HOLIDAY_CACHE_SECONDS = 60   # cache daftar libur pada jalur scan (0 = mati)
 ATTENDANCE_LATE_AFTER = '08:15'         # masuk setelah jam ini = terlambat
 ATTENDANCE_NOON = '12:00'               # sebelum = scan masuk (AM), sesudah = pulang (PM)
 ATTENDANCE_WORK_END = '16:00'           # pulang sebelum jam ini ditandai "pulang awal"
 ATTENDANCE_DUPLICATE_SECONDS = 60
 ATTENDANCE_ACTIVE_STATUS_ID = 1         # Employee.status_id pegawai aktif
 ATTENDANCE_PRESENT_CODE = 'P'           # AttendanceStatus.code untuk hadir
-ATTENDANCE_REQUIRE_DEVICE_KEY = False   # True = kiosk wajib memakai kunci perangkat (opsional)
-ATTENDANCE_TRUST_PROXY_HEADER = False   # True hanya bila server di belakang proxy tepercaya (Nginx)
 ATTENDANCE_MANAGER_GROUPS = ['admin', 'staff']              # kartu QR
 ATTENDANCE_VIEWER_GROUPS = ['admin', 'staff', 'president']  # hari ini + rekap
-ATTENDANCE_DEVICE_GROUPS = ['admin']                        # kunci perangkat kiosk
+ATTENDANCE_DEVICE_GROUPS = ['admin']                        # memasangkan PC kiosk
 ATTENDANCE_SELF_GROUPS = ['admin', 'staff', 'president', 'funsionario', 'employee']
 ATTENDANCE_CARD_BACK_NOTE = {'tet': '...', 'en': '...', 'id': '...', 'pt': '...'}  # atau satu string
 ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (string atau dict per bahasa)
@@ -72,11 +80,24 @@ ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (string
 Dengan `ATTENDANCE_QR_SECRET` terpisah, kartu tetap aman walau `SECRET_KEY` diganti. Isi dengan string acak panjang
 dan jangan diubah setelah kartu dicetak.
 
-**`ATTENDANCE_KIOSK_ALLOWED_IPS`:** kiosk tidak memakai kunci lagi, jadi pembatas utamanya adalah jaringan.
-Tanpa ini, orang yang bisa membuka alamat server dan punya foto QR kartunya bisa absen dari rumah. Selama kosong,
-halaman admin menampilkan peringatan merah. Isi dengan alamat jaringan kantor (CIDR atau satu alamat).
-Jika server di belakang Nginx/proxy, set `ATTENDANCE_TRUST_PROXY_HEADER = True`; alamat klien diambil dari entri
-**paling kanan** `X-Forwarded-For` (yang ditambahkan proxy Anda, tidak bisa dipalsukan klien).
+**Jaringan kantor (`ATTENDANCE_KIOSK_ALLOWED_IPS`):** bawaannya hanya jaringan privat (192.168.x.x, 10.x.x.x, 172.16-31.x.x,
+localhost). Pegawai di rumah memakai alamat publik, jadi scan mereka ditolak walau memegang kartu dan punya fotonya.
+Persempit ke jaringan kantor Anda saja bila perlu, misalnya `['192.168.1.0/24']`. Mengisi `[]` membuka scan dari seluruh
+internet dan memunculkan peringatan merah.
+
+**Di belakang Nginx/proxy:** server hanya melihat alamat proxy, jadi alamat asli pegawai tidak diketahui. Karena itu,
+**bila ada header `X-Forwarded-For` tetapi `ATTENDANCE_TRUST_PROXY_HEADER` belum True, scan ditolak** (gagal-aman) dan
+tercatat di log `attendance.qr`. Setelah proxy Anda tepercaya, set `ATTENDANCE_TRUST_PROXY_HEADER = True` dan pastikan
+Nginx menimpa header itu, bukan menambahkan ke milik klien:
+```nginx
+proxy_set_header X-Forwarded-For $remote_addr;
+```
+Alamat klien diambil dari entri paling kanan header itu.
+
+**Cache:** `ATTENDANCE_REPORT_CACHE_SECONDS` menyimpan hasil dashboard dan rekap seluruh pegawai sebentar (60 detik bawaan)
+dan dipakai bersama semua pimpinan; data di dashboard bisa tertinggal sampai selama itu. Halaman Hari ini, laporan pribadi,
+dan scan selalu langsung. Dengan beberapa proses gunicorn, tiap proses punya cache sendiri; pakai cache bersama
+(Redis/Memcached) bila mau satu cache untuk semua.
 
 ## 4. Pintu masuk, menu, dan bendera bahasa
 
@@ -129,15 +150,19 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
 
 ## 5. Pasang di kantor (sekali saja)
 
-1. Colok scanner QR USB ke PC pintu (mode "keyboard/HID", akhiran Enter, default hampir semua scanner). Tanpa driver.
-2. Buka `http://<server>/attendance/qr/kiosk/` di browser PC itu, layar penuh (F11). **Selesai**: tidak ada kunci,
-   tidak perlu klik atau fokus. Dua penanda di kiri bawah: "Server terhubung" dan "Scanner terdeteksi"
-   (hijau setelah scan pertama). Scanner yang tidak mengirim Enter tetap terbaca otomatis.
-3. **Kartu QR** → pilih pegawai → **Cetak kartu terpilih** → pilih bahasa kartu (bendera) → atur kertas 85,6 × 54 mm
+1. Colok alat pembaca QR USB ke PC pintu (mode "keyboard/HID", akhiran Enter, bawaan hampir semua alat). Tanpa driver.
+2. Di **PC pintu itu**, login sebagai `admin` → **Perangkat kiosk** → **Jadikan PC ini kiosk**. Satu klik, tanpa mengetik
+   kunci. Server membuat kunci acak, hanya sidik SHA-256-nya yang disimpan, dan kunci aslinya dititipkan ke browser PC itu
+   sebagai cookie `HttpOnly` (tidak bisa dibaca JavaScript, hanya terkirim ke `/attendance/qr/`).
+3. Buka `/attendance/qr/kiosk/` di browser yang sama, layar penuh (F11), lalu logout dari akun admin. Selesai: tidak
+   perlu klik atau fokus. Di kiri bawah ada "Server terhubung" dan "Scanner terdeteksi" (hijau setelah scan pertama).
+   PC yang belum dipasangkan menampilkan petunjuk dan tidak menerima scan.
+4. **Kartu QR** → pilih pegawai → **Cetak kartu terpilih** → pilih bahasa kartu (bendera) → atur kertas 85,6 × 54 mm
    tanpa margin → cetak depan+belakang → **Tandai sudah dicetak**.
 
-Kunci perangkat masih ada sebagai pilihan (menu **Perangkat kiosk** + `ATTENDANCE_REQUIRE_DEVICE_KEY = True`).
-Kamera hanya cadangan (tombol "Pakai kamera", Chrome/Edge) dan butuh HTTPS atau `localhost`.
+Mencabut PC kiosk (hilang/diganti): **Perangkat kiosk** → **Nonaktifkan**; PC itu langsung tidak bisa scan.
+Memasangkan ulang di browser yang sama otomatis mematikan pemasangan lamanya. Kamera sengaja mati (hanya alat pembaca QR
+yang dipakai); nyalakan dengan `ATTENDANCE_ALLOW_CAMERA = True` bila perlu, dan butuh HTTPS.
 
 ## 6. Topbar: ganti MCI-HRMS menjadi MDI-HRMS dan warna merah MDI
 
@@ -186,12 +211,16 @@ Empat bahasa: **Tetun (TET), English (EN), Indonesia (ID), Português (PT)**. Ba
 
 ## Tampilan responsif (mobile-first)
 
-CSS ditulis dari ukuran HP lalu diperluas pada 576 / 768 / 900 / 992 px. Sudah diuji di lebar 360, 768, dan 1280 px:
-tanpa geser horizontal, grafik tampil, sasaran sentuh minimal 44 px.
+CSS ditulis dari ukuran HP lalu diperluas pada 576 / 768 / 900 / 992 px. Diuji di 8 ukuran layar: HP kecil 320 px, HP
+360 dan 412 px, HP mendatar 740×360, tablet tegak 768 dan mendatar 1024, PC 1280, dan layar lebar 1920 px, pada 11
+halaman: tanpa geser horizontal, grafik tampil, tanpa galat JavaScript, dan tombol minimal 44 px pada layar sentuh.
 - **HP:** tabel menjadi kartu berlabel; rekap bulanan menjadi satu kartu per pegawai dengan kalender mini;
   kotak angka dua kolom; filter bertumpuk dengan kolom besar; tombol menu dua kolom.
 - **Tablet dan PC:** tabel biasa, rekap berbentuk tabel 31 kolom, kotak angka tiga sampai enam kolom.
-- **Kiosk:** satu kolom di HP dan tablet tegak, dua kolom di layar lebar dan HP mendatar.
+- **Layar sentuh (`pointer: coarse`):** sasaran ketuk 44 px berlaku juga pada tablet lebar; ukuran huruf kolom isian
+  minimal 16 px sehingga iPhone tidak memperbesar halaman saat kolom diketuk.
+- **Kiosk:** satu kolom di HP dan tablet tegak, dua kolom di layar lebar dan HP mendatar; mengikuti area aman layar
+  berponi (`viewport-fit=cover`); menghormati pengaturan "kurangi gerakan".
 - Syarat: `main/layout.html` harus punya `<meta name="viewport" content="width=device-width, initial-scale=1">`
   (layout Anda sudah punya). Tanpa itu HP menampilkan versi desktop yang diperkecil.
 
@@ -217,17 +246,46 @@ tanpa geser horizontal, grafik tampil, sasaran sentuh minimal 44 px.
 | Hari itu sudah diisi manual oleh admin | Ditolak |
 | `AttendanceDiv.is_final` bulan itu | Ditolak |
 | QR salah/dipalsukan, kartu diganti, kartu kedaluwarsa, pegawai non-aktif | Ditolak, tercatat di `ScanLog` |
-| Scan dari alamat di luar `ATTENDANCE_KIOSK_ALLOWED_IPS` | Ditolak (403), tidak tercatat |
+| Scan dari alamat di luar jaringan kantor (mis. dari rumah) | Ditolak (403), tidak tercatat |
+| Scan dari PC/browser yang belum dipasangkan admin, atau sudah dicabut | Ditolak (401); kiosk menampilkan petunjuk pemasangan |
+| Lebih dari 60 permintaan/menit dari satu alamat IP | Ditolak (429) |
 | Tidak ada scan di hari kerja yang sudah lewat | Dihitung Alpha (F) di rekap, tanpa menulis baris |
 
 Hari libur dicocokkan lewat bulan dan tanggal saja (seperti view lama): libur 20 Mei berlaku setiap tahun.
 
 ## Keamanan
 
-- QR berisi `MDI.<id pegawai>.<versi>.<HMAC-SHA256>`. Tidak ada token yang disimpan. Kartu hilang → **Ganti QR**
-  (versi naik, kartu lama langsung mati).
-- Tanpa kunci perangkat, pembatas absen-dari-rumah adalah `ATTENDANCE_KIOSK_ALLOWED_IPS`. **Isi ini** setelah kiosk
-  berjalan. Kalau memakai kunci perangkat, hanya sidik SHA-256-nya yang disimpan.
-- Kolom `hashed` di `Attendance` tetap MD5 dari `getnewid()` karena kolomnya 32 karakter dan view lama mencari lewat itu.
-  SHA-256 dipakai untuk bagian baru (QR dan kunci perangkat).
-- Setiap scan yang sampai ke server, termasuk yang ditolak, tercatat di `ScanLog` beserta alamat IP-nya.
+Scan hanya sah bila **dari jaringan kantor, dari PC yang dipasangkan admin, dengan kartu yang tanda tangannya benar**.
+Dari rumah scan gagal walau memegang kartu atau fotonya.
+
+| Lapis | Perlindungan |
+|---|---|
+| Kartu | QR berisi `MDI.<id>.<versi>.<HMAC-SHA256>`; tidak ada token yang disimpan. Dipalsukan = ditolak. Hilang → **Ganti QR** (versi naik, kartu lama langsung mati). Kartu lama tidak menampilkan nama pemiliknya di kiosk |
+| Jaringan | Hanya jaringan privat bawaan; proxy yang tidak dipercaya = ditolak (gagal-aman); alamat klien dari entri paling kanan header proxy tepercaya |
+| PC kiosk | Cookie `HttpOnly`, `SameSite=Strict`, `Secure` di HTTPS, dibatasi ke `/attendance/qr/`; hanya SHA-256 kunci yang disimpan; bisa dicabut seketika |
+| Permintaan scan | Wajib header `X-Kiosk: 1` dan JSON (formulir lintas situs tidak bisa), ukuran dibatasi 1 KB, 60 permintaan/menit per alamat IP, masukan dibatasi panjang dan karakternya sebelum diperiksa |
+| Hak akses | Login + keanggotaan salah satu grup (bukan hanya grup pertama); tidak berhak = HTTP 403; semua tombol yang mengubah data wajib POST dan token CSRF |
+| Data pegawai | Pegawai hanya melihat datanya sendiri (id tidak pernah diterima dari browser); endpoint JSON mengembalikan 401/403 berupa JSON dan tidak di-cache |
+| Keluaran | Tidak ada `innerHTML` untuk teks dari server (DOM + `textContent`), semua template di-escape, ekspor CSV/Excel menetralkan injeksi rumus (`=`, `+`, `-`, `@`) |
+| Audit | Setiap scan yang sampai ke server, termasuk yang ditolak, tercatat di `ScanLog` beserta IP; bersihkan berkala dengan `prune_scanlogs` |
+| Konfigurasi | `python manage.py check` memberi peringatan: `QR_SECRET` kosong, jaringan dibuka, pemasangan PC dimatikan, zona waktu/jam/IP tidak valid |
+
+Batas yang perlu diketahui: pembaca QR USB bekerja seperti keyboard, jadi server tidak bisa membedakannya dari ketikan
+yang sangat cepat. Pencegahnya berlapis (jaringan kantor + PC terpasang + kamera mati + halaman kiosk hanya dibuka
+di PC pintu). Pegawai yang berada di kantor tetap bisa memfoto QR rekannya; cegah dengan prosedur kantor atau kamera
+pengawas di pintu. Kolom `hashed` di `Attendance` tetap MD5 dari `getnewid()` karena kolomnya 32 karakter dan view lama
+mencari lewat itu; SHA-256/HMAC dipakai untuk bagian baru.
+
+## Server ringan
+
+- **Scan:** 19 query per scan pertama dan 14 per scan pulang; scan ditolak 2 sampai 8 query; masukan sampah hanya 2.
+  Hal-hal yang berat dihindari: foto dan unit tidak diambil per pegawai, daftar libur di-cache, kartu QR dibuat sekaligus.
+- **Laporan:** jumlah query tetap walau pegawainya ratusan (diuji 6 vs 66 pegawai); dashboard dan grafik berbagi satu
+  hasil hitung per menit; CSV dialirkan baris demi baris dan Excel memakai mode tulis-saja agar memori kecil.
+- **Halaman:** Highcharts (280 KB) hanya dimuat di halaman grafik dan memakai `defer`; CSS/JS memakai `?v=<waktu ubah>`
+  sehingga boleh disimpan lama di cache peramban; halaman Hari ini menyegarkan diri tiap menit dan berhenti saat tab
+  tidak terlihat; jam kiosk berhenti saat layar tidak terlihat.
+- **Pemeliharaan:** jadwalkan pembersihan log tiap minggu: `0 3 * * 0  python manage.py prune_scanlogs --days 180`.
+- **Indeks basis data** (opsional, mempercepat pencarian absensi per pegawai dan tanggal pada tabel besar):
+  `CREATE INDEX att_emp_date ON attendance_attendance (employee_id, date);`
+- Produksi: jalankan `collectstatic` dan aktifkan kompresi WhiteNoise (`whitenoise.storage.CompressedManifestStaticFilesStorage`).

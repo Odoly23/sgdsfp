@@ -6,10 +6,13 @@ import datetime
 import hashlib
 import hmac
 import ipaddress
+import logging
 import secrets
+import time
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -22,6 +25,10 @@ from attendance.models import Attendance, AttendanceDiv, AttendanceStatus, Nacio
 from attendance.models_qr import AttendanceTime, QRCard, ScanDevice, ScanLog
 
 QR_PREFIX = 'MDI'
+log = logging.getLogger('attendance.qr')
+
+# Jaringan privat/lokal: bawaan untuk kiosk (alamat 127.x, 10.x, 172.16-31.x, 192.168.x dan IPv6 lokal).
+PRIVATE_NETS = ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10']
 
 _DEFAULTS = {
 	'TIME_ZONE': 'Asia/Dili',
@@ -32,9 +39,15 @@ _DEFAULTS = {
 	'ACTIVE_STATUS_ID': 1,     # Employee.status_id untuk pegawai aktif (sama seperti view lama)
 	'PRESENT_CODE': 'P',       # AttendanceStatus.code untuk hadir
 	'QR_SECRET': None,         # kunci tanda tangan QR; kosong = pakai SECRET_KEY
-	'KIOSK_ALLOWED_IPS': [],   # contoh ['192.168.1.0/24']; kosong = scan diterima dari jaringan mana pun
-	'REQUIRE_DEVICE_KEY': False,   # True = kiosk wajib memakai kunci perangkat (opsional)
+	'KIOSK_ALLOWED_IPS': PRIVATE_NETS,   # bawaan: hanya jaringan privat kantor; contoh ['192.168.1.0/24']; [] = TERBUKA (tidak aman)
+	'REQUIRE_DEVICE_KEY': True,    # scan hanya dari PC kiosk yang sudah dipasangkan admin (penanda di browser PC itu)
+	'ALLOW_CAMERA': False,         # kamera cadangan di kiosk; nonaktif agar hanya alat pembaca QR yang dipakai
 	'TRUST_PROXY_HEADER': False,   # True bila server di belakang proxy tepercaya (pakai X-Forwarded-For)
+	'THROTTLE_PER_MINUTE': 60,     # batas permintaan scan per alamat IP per menit
+	'REPORT_CACHE_SECONDS': 60,    # cache dashboard/rekap seluruh pegawai; 0 = mati
+	'HOLIDAY_CACHE_SECONDS': 60,   # cache daftar libur untuk jalur scan; 0 = mati
+	'MAX_BODY_BYTES': 1024,        # batas ukuran permintaan scan
+	'KIOSK_COOKIE': 'mdi_kiosk',
 	'MANAGER_GROUPS': ['admin', 'staff'],
 	'VIEWER_GROUPS': ['admin', 'staff', 'president'],
 	'DEVICE_GROUPS': ['admin'],
@@ -70,7 +83,7 @@ def hhmm(dt):
 	return to_local(dt).strftime('%H:%M') if dt else ''
 
 
-# ---------------------------------------------------------------- QR dan kunci perangkat
+# ---------------------------------------------------------------- QR (tanda tangan)
 
 def _secret():
 	return (conf('QR_SECRET') or settings.SECRET_KEY).encode()
@@ -86,34 +99,27 @@ def make_payload(card):
 
 
 def parse_payload(raw):
-	"""Mengembalikan (employee_id, version) kalau tanda tangan benar, selain itu None."""
-	parts = (raw or '').strip().split('.')
+	"""Mengembalikan (employee_id, version) kalau tanda tangan benar, selain itu None.
+	Masukan berasal dari pihak tak tepercaya: dibatasi panjang dan karakternya sebelum dihitung."""
+	if not isinstance(raw, str) or len(raw) > 200:
+		return None
+	parts = raw.strip().split('.')
 	if len(parts) != 4 or parts[0] != QR_PREFIX:
 		return None
-	try:
-		emp_id, version = int(parts[1]), int(parts[2])
-	except ValueError:
+	if not (parts[1].isascii() and parts[1].isdigit() and parts[2].isascii() and parts[2].isdigit()):
 		return None
-	if not hmac.compare_digest(parts[3], _sign(emp_id, version)):
+	if len(parts[1]) > 18 or len(parts[2]) > 9 or len(parts[3]) != 32 or not parts[3].isascii():
+		return None
+	emp_id, version = int(parts[1]), int(parts[2])
+	if not hmac.compare_digest(parts[3].encode('ascii'), _sign(emp_id, version).encode('ascii')):
 		return None
 	return emp_id, version
 
 
-def hash_key(key):
-	return hashlib.sha256(key.encode()).hexdigest()
+# ---------------------------------------------------------------- jaringan, PC kiosk, pembatasan
 
+_PROXY_HEADERS = ('HTTP_X_FORWARDED_FOR', 'HTTP_FORWARDED', 'HTTP_X_REAL_IP')
 
-def new_device_key():
-	return secrets.token_urlsafe(24)
-
-
-def get_device(key):
-	if not key:
-		return None
-	return ScanDevice.objects.filter(key_sha256=hash_key(key), is_active=True).first()
-
-
-# ---------------------------------------------------------------- jaringan
 
 def client_ip(request):
 	if conf('TRUST_PROXY_HEADER'):
@@ -123,9 +129,15 @@ def client_ip(request):
 	return request.META.get('REMOTE_ADDR', '')
 
 
-def ip_allowed(ip):
+def allowed_nets():
+	"""Daftar jaringan yang boleh scan; None bila sengaja dibuka (setelan [])."""
 	nets = conf('KIOSK_ALLOWED_IPS')
-	if not nets:
+	return list(nets) if nets else None
+
+
+def ip_allowed(ip):
+	nets = allowed_nets()
+	if nets is None:
 		return True
 	try:
 		addr = ipaddress.ip_address(ip)
@@ -140,9 +152,78 @@ def ip_allowed(ip):
 	return False
 
 
+def network_ok(request):
+	"""Jaringan kantor saja. Bila ada header proxy tetapi proxy tidak dipercaya, alamat asli tidak diketahui:
+	ditolak (gagal-aman), dan admin diberi tahu lewat log."""
+	if allowed_nets() is None:
+		return True
+	if not conf('TRUST_PROXY_HEADER') and any(h in request.META for h in _PROXY_HEADERS):
+		if cache.add('attqr:proxywarn', 1, 600):
+			log.warning('Scan ditolak: ada header proxy tetapi ATTENDANCE_TRUST_PROXY_HEADER=False. '
+						'Set True bila server di belakang Nginx/proxy tepercaya.')
+		return False
+	return ip_allowed(client_ip(request))
+
+
 def security_is_open():
-	"""True bila scan bisa dikirim dari mana saja tanpa kunci perangkat (perlu peringatan ke admin)."""
-	return not conf('KIOSK_ALLOWED_IPS') and not conf('REQUIRE_DEVICE_KEY')
+	"""True bila jaringan sengaja dibuka lebar (perlu peringatan ke admin)."""
+	return allowed_nets() is None
+
+
+def throttle(request, scope='scan'):
+	"""Pembatas per IP per menit (cache). True = boleh. Melindungi basis data dari banjir permintaan."""
+	limit = conf('THROTTLE_PER_MINUTE')
+	if not limit:
+		return True
+	key = 'attqr:thr:%s:%s:%d' % (scope, client_ip(request), int(time.time() // 60))
+	try:
+		n = cache.incr(key)
+	except ValueError:
+		cache.add(key, 1, 90)
+		n = 1
+	return n <= limit
+
+
+def hash_key(key):
+	return hashlib.sha256(key.encode()).hexdigest()
+
+
+def new_device_key():
+	return secrets.token_urlsafe(32)
+
+
+def get_device(key):
+	if not key or len(key) > 128:
+		return None
+	return ScanDevice.objects.filter(key_sha256=hash_key(key), is_active=True).first()
+
+
+def device_from_request(request):
+	"""PC kiosk dikenali dari penanda (cookie HttpOnly) yang dipasang admin; header X-Kiosk-Key untuk klien API."""
+	return get_device(request.COOKIES.get(conf('KIOSK_COOKIE')) or request.headers.get('X-Kiosk-Key', ''))
+
+
+def in_groups(user, names):
+	"""Apakah pengguna masuk salah satu grup (bukan hanya grup pertama). Hasil disimpan per permintaan."""
+	if not getattr(user, 'is_authenticated', False):
+		return False
+	mine = getattr(user, '_qr_group_names', None)
+	if mine is None:
+		mine = user._qr_group_names = set(user.groups.values_list('name', flat=True))
+	return bool(mine & set(names))
+
+
+def cached(parts, fn):
+	"""Cache singkat untuk laporan seluruh pegawai (dipakai bersama semua pimpinan)."""
+	ttl = conf('REPORT_CACHE_SECONDS')
+	if not ttl:
+		return fn()
+	key = 'attqr:rep:' + hashlib.sha256(repr(parts).encode()).hexdigest()[:40]
+	value = cache.get(key)
+	if value is None:
+		value = fn()
+		cache.set(key, value, ttl)
+	return value
 
 
 # ---------------------------------------------------------------- data pegawai
@@ -188,16 +269,11 @@ def photo_url(emp):
 
 def day_off_reason(d):
 	"""(jenis, nama) bila hari ini bukan hari kerja, selain itu None. Jenis: weekend, holiday, tolerance.
-	Libur dicocokkan lewat bulan dan tanggal, sama seperti view absensi yang sudah ada."""
+	Libur dicocokkan lewat bulan dan tanggal, sama seperti view absensi yang sudah ada. Daftar libur disimpan
+	singkat di cache (jalur scan paling sering dipanggil, sedangkan libur jarang berubah)."""
 	if d.weekday() >= 5:
 		return 'weekend', ''
-	h = NacionalHoliday.objects.filter(date__month=d.month, date__day=d.day).exclude(is_active=False).first()
-	if h:
-		return 'holiday', h.name or ''
-	t = Tolerance.objects.filter(date__month=d.month, date__day=d.day).exclude(is_active=False).first()
-	if t:
-		return 'tolerance', t.name or ''
-	return None
+	return _holidays_for_scan().get((d.month, d.day))
 
 
 def holiday_map():
@@ -211,6 +287,17 @@ def holiday_map():
 	return out
 
 
+def _holidays_for_scan():
+	ttl = conf('HOLIDAY_CACHE_SECONDS')
+	if not ttl:
+		return holiday_map()
+	value = cache.get('attqr:hol')
+	if value is None:
+		value = holiday_map()
+		cache.set('attqr:hol', value, ttl)
+	return value
+
+
 def active_leave(emp, d):
 	return (Leaves.objects.filter(employee=emp, is_active=True, is_confirm=True,
 			start_date__lte=d, end_date__gte=d).select_related('leave_type').first())
@@ -218,12 +305,12 @@ def active_leave(emp, d):
 
 # ---------------------------------------------------------------- scan
 
-def _result(ok, result_code, level, emp, lang, **params):
+def _result(ok, result_code, level, emp, lang, hide=False, **params):
 	"""Hasil scan untuk layar kiosk. Judul dan pesan diambil dari qr_i18n (res.<result_code>.title / .msg)."""
 	res = {'ok': ok, 'code': result_code, 'level': level,
 		   'title': qr_i18n.tr(lang, 'res.%s.title' % result_code, **params),
 		   'message': qr_i18n.tr(lang, 'res.%s.msg' % result_code, **params),
-		   'employee': employee_info(emp) if emp else None, 'employee_id': emp.pk if emp else None}
+		   'employee': employee_info(emp) if emp and not hide else None, 'employee_id': emp.pk if emp else None}
 	if 'time' in params:
 		res['time'] = params['time']
 	return res
@@ -244,11 +331,12 @@ def _process(raw, device, now, lang):
 	if not parsed:
 		return _result(False, 'invalid', 'error', None, lang)
 	emp_id, version = parsed
-	emp = (Employee.objects.select_related('employeeposition__position', 'employeedivision__division')
-		   .filter(pk=emp_id).first())
-	card = QRCard.objects.filter(employee_id=emp_id).first()
+	emp = (Employee.objects.select_related('employeeposition__position', 'employeedivision__division',
+										  'qrcard', 'employeecard', 'idfnumber', 'photo').filter(pk=emp_id).first())
+	card = getattr(emp, 'qrcard', None) if emp else None
 	if not emp or not card or not card.is_active or card.version != version:
-		return _result(False, 'revoked', 'error', emp, lang)
+		# kartu lama/hilang: jangan tampilkan siapa pemiliknya di layar kiosk (privasi); tetap tercatat di log
+		return _result(False, 'revoked', 'error', emp, lang, hide=True)
 	if emp.status_id != conf('ACTIVE_STATUS_ID'):
 		return _result(False, 'inactive', 'error', emp, lang)
 
@@ -295,7 +383,7 @@ def _first_scan(emp, div, present, device, now, local, today, lang):
 		try:
 			with transaction.atomic():
 				att = Attendance.objects.create(
-					id=newid, dg=div.dg if div else None, div=div, employee=emp,
+					id=newid, dg_id=div.dg_id if div else None, div=div, employee=emp,
 					status_am=None if after_noon else present, status_pm=present if after_noon else None,
 					date=today, desc='Scan QR', datetime=now, hashed=hashed)
 			break

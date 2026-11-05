@@ -2,6 +2,9 @@ from django import template
 from django.utils.html import format_html_join, escape
 from django.utils.safestring import mark_safe
 
+import os
+
+from django.templatetags.static import static
 from django.urls import reverse
 
 from attendance import qr_i18n as i18n
@@ -66,7 +69,7 @@ def flags(context, mode='link'):
 
 def _is_viewer(context):
 	request = context.get('request')
-	return request is not None and svc.group_of(request.user) in svc.conf('VIEWER_GROUPS')
+	return request is not None and svc.in_groups(request.user, svc.conf('VIEWER_GROUPS'))
 
 
 @register.simple_tag(takes_context=True)
@@ -79,3 +82,22 @@ def qr_tab_url(context):
 def qr_chart_url(context):
 	"""Tujuan menu "Grafiku"."""
 	return reverse('qr-dash-chart' if _is_viewer(context) else 'qr-me-chart')
+
+
+_ASSET_VERSION = {}
+
+
+@register.simple_tag
+def qr_static(path):
+	"""URL berkas statis + ?v=<waktu ubah>: peramban boleh menyimpannya lama dan otomatis mengambil yang baru setelah diubah."""
+	v = _ASSET_VERSION.get(path)
+	if v is None:
+		try:
+			from django.contrib.staticfiles import finders
+			from django.contrib.staticfiles.storage import staticfiles_storage
+			found = finders.find(path) or staticfiles_storage.path(path)
+			v = str(int(os.path.getmtime(found)))
+		except Exception:
+			v = ''
+		_ASSET_VERSION[path] = v
+	return static(path) + ('?v=' + v if v else '')

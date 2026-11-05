@@ -1,9 +1,11 @@
 import datetime
 import io
+import json
 from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import Group, User
+from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.test import TestCase, override_settings
@@ -29,7 +31,18 @@ def at(date, hh, mm=0):
 
 
 class QRBase(TestCase):
+	def pair(self, name='Pintu'):
+		"""Memasangkan klien uji sebagai PC kiosk (cookie penanda), seperti yang dilakukan admin di PC pintu."""
+		key = svc.new_device_key()
+		dev = ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key))
+		self.client.cookies['mdi_kiosk'] = key
+		return dev, key
+
+	def post_scan(self, body, **extra):
+		return self.client.post(reverse('qr-kiosk-scan'), data=body, content_type='application/json', HTTP_X_KIOSK='1', **extra)
+
 	def setUp(self):
+		cache.clear()
 		self.P = AttendanceStatus.objects.create(code='P', name='Presensa')
 		AttendanceStatus.objects.create(code='F', name='Falta')
 		AttendanceStatus.objects.create(code='L', name='Lisensa')
@@ -302,62 +315,117 @@ class ViewTests(QRBase):
 		self.client.cookies['mdi_lang'] = 'id'
 		return u
 
-	def api(self, code, key=None):
-		headers = {'HTTP_X_KIOSK_KEY': key} if key else {}
-		return self.client.post(reverse('qr-kiosk-scan'), data={'code': code}, content_type='application/json', **headers)
+	def api(self, code):
+		return self.post_scan({'code': code})
 
-	def device(self):
-		key = svc.new_device_key()
-		ScanDevice.objects.create(name='Pintu', key_sha256=svc.hash_key(key))
-		return key
-
-	def test_kiosk_page_is_public(self):
+	def test_kiosk_page_is_public_and_hardened(self):
 		r = self.client.get(reverse('qr-kiosk'))
 		self.assertEqual(r.status_code, 200)
 		self.assertContains(r, 'id="clock"')
 		self.assertContains(r, 'Asia/Dili')
+		self.assertEqual(r['Cache-Control'], 'no-store')
+		self.assertEqual(r['X-Frame-Options'], 'DENY')
+		self.assertEqual(r['Referrer-Policy'], 'same-origin')
+		self.assertNotContains(r, 'type="password"')                       # tidak ada lagi kolom kunci yang diketik
+		self.assertContains(r, 'data-camera=""')                          # kamera mati secara bawaan
 
-	def test_scan_works_without_device_key_by_default(self):
-		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
-			r = self.api(self.payload)
-		self.assertEqual((r.status_code, r.json()['code']), (200, 'in'))
-		self.assertIsNone(ScanLog.objects.get().device)
+	@override_settings(ATTENDANCE_ALLOW_CAMERA=True)
+	def test_camera_only_when_allowed(self):
+		self.assertContains(self.client.get(reverse('qr-kiosk')), 'data-camera="1"')
 
-	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=True)
-	def test_scan_api_requires_device_key_when_enabled(self):
+	def test_scan_requires_paired_pc_by_default(self):
+		r = self.api(self.payload)
+		self.assertEqual((r.status_code, r.json()['code']), (401, 'device'))
+		self.client.cookies['mdi_kiosk'] = 'cookie-asal-asalan'
 		self.assertEqual(self.api(self.payload).status_code, 401)
-		self.assertEqual(self.api(self.payload, key='nope').status_code, 401)
 		self.assertEqual(ScanLog.objects.count(), 0)
 		self.assertEqual(Attendance.objects.count(), 0)
 
-	def test_scan_api_ok_and_hides_internal_id(self):
-		key = self.device()
+	def test_revoked_pc_is_rejected_immediately(self):
+		dev, key = self.pair()
 		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
-			r = self.api(self.payload, key)
+			self.assertEqual(self.api(self.payload).status_code, 200)
+		ScanDevice.objects.update(is_active=False)
+		self.assertEqual(self.api(self.payload).status_code, 401)
+
+	def test_scan_ok_from_paired_pc_and_hides_internal_id(self):
+		dev, key = self.pair()
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			r = self.api(self.payload)
 		self.assertEqual(ScanLog.objects.get().ip, '127.0.0.1')
 		data = r.json()
 		self.assertEqual((r.status_code, data['ok'], data['code']), (200, True, 'in'))
 		self.assertNotIn('employee_id', data)
 		self.assertEqual(data['employee']['name'], 'Maria Silva')
 		self.assertIsNotNone(ScanDevice.objects.get().last_seen)
+		self.assertEqual(r['Cache-Control'], 'no-store')
+
+	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=False)
+	def test_pairing_can_be_turned_off(self):
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			r = self.api(self.payload)
+		self.assertEqual((r.status_code, r.json()['code']), (200, 'in'))
+		self.assertIsNone(ScanLog.objects.get().device)
 
 	def test_scan_api_garbage_and_get(self):
-		key = self.device()
-		r = self.client.post(reverse('qr-kiosk-scan'), data='not json', content_type='application/json', HTTP_X_KIOSK_KEY=key)
+		self.pair()
+		r = self.client.post(reverse('qr-kiosk-scan'), data='not json', content_type='application/json', HTTP_X_KIOSK='1')
 		self.assertEqual(r.json()['code'], 'invalid')
-		r = self.client.post(reverse('qr-kiosk-scan'), data={'code': 123}, content_type='application/json', HTTP_X_KIOSK_KEY=key)
-		self.assertEqual(r.json()['code'], 'invalid')
+		self.assertEqual(self.post_scan({'code': 123}).json()['code'], 'invalid')
+		self.assertEqual(self.post_scan([1, 2]).json()['code'], 'invalid')
 		self.assertEqual(self.client.get(reverse('qr-kiosk-scan')).status_code, 405)
 
-	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=True)
-	def test_kiosk_check_with_required_key(self):
-		key = self.device()
-		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY=key).status_code, 200)
-		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY='x').status_code, 401)
+	def test_scan_needs_custom_header(self):
+		self.pair()
+		r = self.client.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json')
+		self.assertEqual(r.status_code, 400)
+		self.assertEqual(Attendance.objects.count(), 0)
 
-	def test_kiosk_check_open_by_default(self):
+	def test_scan_is_csrf_safe_without_token(self):
+		from django.test import Client
+		c = Client(enforce_csrf_checks=True)
+		key = svc.new_device_key()
+		ScanDevice.objects.create(name='X', key_sha256=svc.hash_key(key))
+		c.cookies['mdi_kiosk'] = key
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			ok = c.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json', HTTP_X_KIOSK='1')
+			form = c.post(reverse('qr-kiosk-scan'), data={'code': self.payload})                  # form lintas situs tanpa header
+		self.assertEqual(ok.status_code, 200)
+		self.assertEqual(form.status_code, 400)
+
+	def test_scan_rejects_oversized_body(self):
+		self.pair()
+		r = self.post_scan({'code': 'x' * 3000})
+		self.assertEqual(r.status_code, 413)
+		self.assertEqual(ScanLog.objects.count(), 0)
+
+	@override_settings(ATTENDANCE_THROTTLE_PER_MINUTE=3)
+	def test_scan_is_throttled_per_ip(self):
+		self.pair()
+		with mock.patch.object(svc.time, 'time', lambda: 1_000_000.0):
+			codes = [self.post_scan({'code': 'junk'}).status_code for _ in range(5)]
+			other = self.post_scan({'code': 'junk'}, REMOTE_ADDR='192.168.1.9').status_code
+		self.assertEqual(codes, [200, 200, 200, 429, 429])
+		self.assertEqual(other, 200)                                       # IP lain tidak ikut terblokir
+		self.assertEqual(ScanLog.objects.count(), 3 + 1)                   # permintaan yang diblokir tidak menulis ke basis data
+		with mock.patch.object(svc.time, 'time', lambda: 1_000_060.0):     # menit berikutnya: boleh lagi
+			self.assertEqual(self.post_scan({'code': 'junk'}).status_code, 200)
+
+	def test_throttle_response_is_json_in_default_language(self):
+		self.pair()
+		with override_settings(ATTENDANCE_THROTTLE_PER_MINUTE=1), mock.patch.object(svc.time, 'time', lambda: 5.0):
+			self.post_scan({'code': 'a'})
+			r = self.post_scan({'code': 'a'})
+		self.assertEqual((r.status_code, r.json()['code'], r.json()['level']), (429, 'throttle', 'error'))
+
+	def test_kiosk_check_states(self):
+		r = self.client.get(reverse('qr-kiosk-check'))
+		self.assertEqual((r.status_code, r.json()['state']), (401, 'key'))
+		self.pair()
 		r = self.client.get(reverse('qr-kiosk-check'))
 		self.assertEqual((r.status_code, r.json()['state']), (200, 'ok'))
+		self.assertEqual(r['Cache-Control'], 'no-store')
+		self.assertEqual(self.client.post(reverse('qr-kiosk-check')).status_code, 405)
 
 	def test_pages_require_login(self):
 		for name in ['qr-today', 'qr-devices', 'qr-cards', 'qr-report', 'qr-me']:
@@ -376,16 +444,16 @@ class ViewTests(QRBase):
 	def test_group_permissions(self):
 		self.login('president')
 		self.assertContains(self.client.get(reverse('qr-report')), 'Rekap absensi')
-		self.assertContains(self.client.get(reverse('qr-cards')), '403')
-		self.assertContains(self.client.get(reverse('qr-devices')), '403')
+		self.assertContains(self.client.get(reverse('qr-cards')), '403', status_code=403)
+		self.assertContains(self.client.get(reverse('qr-devices')), '403', status_code=403)
 		self.client.logout()
 		self.login('staff')
 		self.assertContains(self.client.get(reverse('qr-cards')), 'Kartu QR pegawai')
-		self.assertContains(self.client.get(reverse('qr-devices')), '403')
+		self.assertContains(self.client.get(reverse('qr-devices')), '403', status_code=403)
 		self.client.logout()
 		self.login('funsionario')
-		self.assertContains(self.client.get(reverse('qr-report')), '403')
-		self.assertContains(self.client.get(reverse('qr-today')), '403')
+		self.assertContains(self.client.get(reverse('qr-report')), '403', status_code=403)
+		self.assertContains(self.client.get(reverse('qr-today')), '403', status_code=403)
 		self.assertContains(self.client.get(reverse('qr-me')), 'Absensi saya')
 
 	def test_me_shows_only_own_rows(self):
@@ -397,17 +465,56 @@ class ViewTests(QRBase):
 		self.assertContains(r, 'Maria Silva')
 		self.assertNotContains(r, 'Jose Costa')
 
-	def test_device_add_shows_key_once_and_stores_only_hash(self):
+	def test_pairing_sets_secure_cookie_and_stores_only_hash(self):
 		self.login('admin')
-		r = self.client.post(reverse('qr-device-add'), {'name': 'PC Pintu'})
-		key = r.context['new_key']
-		self.assertContains(r, key)
+		r = self.client.post(reverse('qr-device-pair'), {'name': 'PC Pintu'})
+		self.assertEqual(r.status_code, 302)
+		c = r.cookies['mdi_kiosk']
+		self.assertTrue(c['httponly'])
+		self.assertEqual(c['samesite'], 'Strict')
+		self.assertEqual(c['path'], '/attendance/qr/')
+		self.assertEqual(c['max-age'], 5 * 365 * 86400)
 		dev = ScanDevice.objects.get()
-		self.assertEqual(dev.key_sha256, svc.hash_key(key))
-		self.assertNotContains(self.client.get(reverse('qr-devices')), key)
+		self.assertEqual((dev.name, dev.key_sha256), ('PC Pintu', svc.hash_key(c.value)))
+		self.assertNotIn(c.value, dev.key_sha256)
+		self.assertNotContains(self.client.get(reverse('qr-devices')), c.value)       # kunci asli tidak pernah tampil di halaman
+		self.assertContains(self.client.get(reverse('qr-devices')), 'sudah dipasangkan sebagai: PC Pintu')
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			self.assertEqual(self.api(self.payload).json()['code'], 'in')               # PC itu langsung bisa scan
+
+	def test_pairing_secure_flag_on_https(self):
+		self.login('admin')
+		r = self.client.post(reverse('qr-device-pair'), {}, secure=True)
+		self.assertTrue(r.cookies['mdi_kiosk']['secure'])
+		self.assertEqual(ScanDevice.objects.get().name, 'PC kiosk')          # nama bawaan
+
+	def test_default_name_and_repairing_replaces_previous(self):
+		self.login('admin')
+		self.client.post(reverse('qr-device-pair'), {})
+		first = ScanDevice.objects.get()
+		self.assertEqual(first.name, 'PC kiosk')
+		self.client.post(reverse('qr-device-pair'), {'name': 'Baru'})
+		devs = {d.name: d.is_active for d in ScanDevice.objects.all()}
+		self.assertEqual(sorted(devs.values()), [False, True])           # pemasangan lama di browser ini dimatikan
+		self.assertTrue(devs['Baru'])
+
+	def test_only_device_admins_can_pair_and_post_only(self):
+		self.login('staff')
+		r = self.client.post(reverse('qr-device-pair'), {})
+		self.assertEqual(r.status_code, 403)
+		self.assertNotIn('mdi_kiosk', r.cookies)
+		self.assertEqual(ScanDevice.objects.count(), 0)
+		self.client.logout()
+		self.login('admin')
+		self.assertEqual(self.client.get(reverse('qr-device-pair')).status_code, 405)
+
+	def test_toggle_revokes_paired_pc(self):
+		self.login('admin')
+		self.client.post(reverse('qr-device-pair'), {})
+		dev = ScanDevice.objects.get()
 		self.client.post(reverse('qr-device-toggle', args=[dev.pk]))
 		self.assertFalse(ScanDevice.objects.get().is_active)
-		self.assertIsNone(svc.get_device(key))
+		self.assertEqual(self.api(self.payload).status_code, 401)
 
 	def test_card_print_creates_card_and_renders_qr_that_scans(self):
 		self.login('admin')
@@ -449,7 +556,8 @@ class ViewTests(QRBase):
 		self.scan(MON, 8, 30)
 		r = self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11, 'fmt': 'csv'})
 		self.assertEqual(r.status_code, 200)
-		text = r.content.decode('utf-8-sig')
+		self.assertTrue(r.streaming)
+		text = b''.join(r.streaming_content).decode('utf-8-sig')
 		lines = text.strip().splitlines()
 		self.assertTrue(lines[0].startswith('NRF,Nama,Jabatan,Divisi,1,2,3'))
 		self.assertIn('Maria Silva', lines[1])
@@ -467,42 +575,75 @@ class ViewTests(QRBase):
 
 
 class NetworkTests(QRBase):
+	"""Scan hanya dari jaringan kantor: dari rumah (alamat publik) harus gagal."""
+
+	def setUp(self):
+		super().setUp()
+		self.pair()
+
 	def post(self, **extra):
 		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
-			return self.client.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json', **extra)
+			return self.post_scan({'code': self.payload}, **extra)
 
-	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8', '192.168.1.5'])
-	def test_ip_allowlist(self):
-		r = self.post(REMOTE_ADDR='203.0.113.9')
+	def test_default_accepts_only_private_networks(self):
+		for ip, ok in [('127.0.0.1', True), ('192.168.1.20', True), ('10.5.5.5', True), ('172.16.3.3', True),
+					   ('172.31.255.254', True), ('::1', True), ('fd12:3456::1', True),
+					   ('203.0.113.9', False), ('8.8.8.8', False), ('172.32.0.1', False), ('192.169.0.1', False),
+					   ('2001:db8::1', False), ('not-an-ip', False), ('', False)]:
+			Attendance.objects.all().delete()
+			r = self.post(REMOTE_ADDR=ip)
+			self.assertEqual(r.status_code == 200, ok, ip)
+			if not ok:
+				self.assertEqual(r.json()['code'], 'net', ip)
+				self.assertEqual(Attendance.objects.count(), 0, ip)
+
+	def test_from_home_is_rejected_even_with_valid_card_and_paired_cookie(self):
+		r = self.post(REMOTE_ADDR='114.4.20.10')                   # alamat publik pegawai di rumah
 		self.assertEqual((r.status_code, r.json()['code']), (403, 'net'))
 		self.assertEqual(Attendance.objects.count(), 0)
+		self.assertIsNone(r.json()['employee'])                     # tidak membocorkan nama
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8', '192.168.1.5'])
+	def test_custom_allowlist(self):
+		self.assertEqual(self.post(REMOTE_ADDR='203.0.113.9').status_code, 403)
 		self.assertEqual(self.post(REMOTE_ADDR='10.1.2.3').status_code, 200)
+		self.assertEqual(self.post(REMOTE_ADDR='192.168.1.5').status_code, 200)
+		self.assertEqual(self.post(REMOTE_ADDR='192.168.1.6').status_code, 403)       # bukan di daftar sendiri
 		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), REMOTE_ADDR='203.0.113.9').status_code, 403)
 		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), REMOTE_ADDR='192.168.1.5').status_code, 200)
 
-	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8'])
-	def test_spoofed_forwarded_header_is_ignored_unless_trusted(self):
-		r = self.post(REMOTE_ADDR='203.0.113.9', HTTP_X_FORWARDED_FOR='10.1.1.1')
-		self.assertEqual(r.status_code, 403)
+	def test_untrusted_proxy_header_fails_closed_and_warns_admin(self):
+		with self.assertLogs('attendance.qr', 'WARNING') as logs:
+			r = self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='10.1.1.1')
+		self.assertEqual((r.status_code, r.json()['code']), (403, 'net'))
+		self.assertIn('ATTENDANCE_TRUST_PROXY_HEADER', logs.output[0])
+		for header in ('HTTP_FORWARDED', 'HTTP_X_REAL_IP'):
+			self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', **{header: 'for=10.1.1.1'}).status_code, 403)
 
-	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8'], ATTENDANCE_TRUST_PROXY_HEADER=True)
+	@override_settings(ATTENDANCE_TRUST_PROXY_HEADER=True)
 	def test_trusted_proxy_uses_rightmost_entry(self):
 		# klien memalsukan 10.1.1.1 di kiri; proxy menambahkan alamat asli (luar kantor) di kanan
 		self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='10.1.1.1, 203.0.113.9').status_code, 403)
-		self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='198.51.100.7, 10.2.2.2').status_code, 200)
+		self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='198.51.100.7, 192.168.1.44').status_code, 200)
 
 	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['not-an-ip', '10.0.0.0/8'])
 	def test_bad_config_entries_do_not_open_access(self):
 		self.assertEqual(self.post(REMOTE_ADDR='203.0.113.9').status_code, 403)
+		self.assertEqual(self.post(REMOTE_ADDR='10.0.0.7').status_code, 200)
 
-	def test_security_banner_for_managers(self):
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=[])
+	def test_explicitly_open_network_works_and_is_flagged(self):
+		self.assertEqual(self.post(REMOTE_ADDR='203.0.113.9').status_code, 200)
+		self.assertTrue(svc.security_is_open())
+
+	def test_security_banner_only_when_network_is_open(self):
 		u = User.objects.create_user('m', password='x')
 		u.groups.add(Group.objects.create(name='admin'))
 		self.client.force_login(u)
 		self.client.cookies['mdi_lang'] = 'id'
-		self.assertContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
-		with override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8']):
-			self.assertNotContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
+		self.assertNotContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
+		with override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=[]):
+			self.assertContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
 
 
 class I18nTests(QRBase):
@@ -658,12 +799,14 @@ class I18nTests(QRBase):
 		self.assertContains(r, 'ASSIDUIDADE DOS FUNCIONÁRIOS')
 
 	def test_scan_result_language(self):
+		self.pair()
+
 		def api(lang):
 			body = {'code': self.payload}
 			if lang:
 				body['lang'] = lang
 			with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
-				return self.client.post(reverse('qr-kiosk-scan'), data=body, content_type='application/json').json()
+				return self.post_scan(body).json()
 		self.assertEqual(api('pt')['title'], 'Bem-vindo')
 		Attendance.objects.all().delete()
 		self.assertEqual(api('en')['message'], 'Checked in at 08:00.')
@@ -721,7 +864,7 @@ class I18nTests(QRBase):
 	def test_csv_headers_follow_language(self):
 		self.login_admin()
 		self.client.cookies['mdi_lang'] = 'en'
-		text = self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).content.decode('utf-8-sig')
+		text = b''.join(self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).streaming_content).decode('utf-8-sig')
 		self.assertTrue(text.startswith('NRF,Name,Position,Division,1,2'))
 		self.assertIn('Work days,Present,Late,Leave,Absent', text)
 
@@ -822,10 +965,10 @@ class ReportPageTests(QRBase):
 			self.login(group)
 			for name in ('qr-dash', 'qr-dash-chart'):
 				r = self.client.get(reverse(name))
-				self.assertEqual(r.status_code, 200, (group, name))
+				self.assertEqual(r.status_code, 200 if ok else 403, (group, name))
 				self.assertEqual('Dasbor laporan absensi' in r.content.decode(), ok, (group, name))
 				if not ok:
-					self.assertContains(r, '403')
+					self.assertContains(r, '403', status_code=403)
 
 	def test_dash_tabular_content(self):
 		self.login('admin')
@@ -1020,7 +1163,8 @@ class ResponsiveTests(QRBase):
 		kiosk = self.client.get(reverse('qr-kiosk')).content.decode()
 		cards = self.client.post(reverse('qr-card-print'), {'ids': [self.emp.pk]}).content.decode()
 		for html in (kiosk, cards):
-			self.assertIn('<meta name="viewport" content="width=device-width, initial-scale=1">', html)
+			self.assertIn('name="viewport" content="width=device-width, initial-scale=1', html)
+		self.assertIn('viewport-fit=cover', kiosk)                       # layar berponi
 
 	def test_report_has_card_view_for_phones_and_grid_for_wide_screens(self):
 		self.login_admin()
@@ -1061,3 +1205,270 @@ class ResponsiveTests(QRBase):
 		self.assertIn('min-height: 46px', base)                         # sasaran sentuh >= 44px
 		self.assertIn('.k-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr)', base)
 		self.assertRegex(css, r'\.k-top \{[^}]*flex-wrap: wrap')           # header kiosk membungkus di HP
+
+
+class SecurityTests(QRBase):
+	def login(self, *groups, name='sec'):
+		u = User.objects.create_user(name, password='x')
+		for g in groups:
+			u.groups.add(Group.objects.get_or_create(name=g)[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		return u
+
+	# ---------- masukan tak tepercaya
+	def test_payload_parsing_never_raises_on_hostile_input(self):
+		sig = self.payload.split('.')[3]
+		hostile = ['MDI.1.1.' + 'é' * 32, 'MDI.1.1.' + '١' * 32, 'MDI.١٢.1.' + sig,
+				   'MDI.' + '9' * 5000 + '.1.' + sig, 'MDI.1.' + '9' * 40 + '.' + sig, 'MDI.1.1.' + sig + 'x', 'MDI.1.1.',
+				   'MDI..1.' + sig, 'MDI.-1.1.' + sig, 'MDI.1.1.' + sig + '\x00', '\x00' * 50, 'M' * 5000, b'MDI', 12345, None, ['x']]
+		for raw in hostile:
+			self.assertIsNone(svc.parse_payload(raw), repr(raw)[:60])
+		self.assertEqual(svc.parse_payload(self.payload), (self.emp.pk, 1))
+
+	def test_non_ascii_qr_through_api_is_a_normal_rejection_not_a_500(self):
+		self.pair()
+		for code in ['MDI.1.1.' + 'é' * 32, '‮' * 20, 'MDI.' + '9' * 150]:
+			r = self.post_scan({'code': code})
+			self.assertEqual((r.status_code, r.json()['code']), (200, 'invalid'))
+
+	def test_kiosk_response_exposes_only_what_the_screen_shows(self):
+		self.pair()
+		IDFNumber.objects.create(employee=self.emp, nrf='NRF-RAHASIA')
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			d = self.post_scan({'code': self.payload}).json()
+		self.assertEqual(sorted(d['employee']), ['division', 'name', 'photo', 'position'])
+		self.assertNotIn('NRF-RAHASIA', json.dumps(d))
+		self.assertNotIn(str(self.emp.pk) + '"', json.dumps(d['employee']))
+
+	def test_revoked_card_does_not_reveal_owner(self):
+		self.pair()
+		old = self.payload
+		self.card.version = 2
+		self.card.save()
+		r = self.post_scan({'code': old})
+		d = r.json()
+		self.assertEqual(d['code'], 'revoked')
+		self.assertIsNone(d['employee'])                           # layar kiosk tidak menampilkan nama pemilik
+		self.assertEqual(ScanLog.objects.get().employee_id, self.emp.pk)    # tetapi tetap tercatat untuk audit
+
+	def test_csv_and_xlsx_formula_injection_is_neutralised(self):
+		Employee.objects.filter(pk=self.emp.pk).update(first_name='=HYPERLINK("http://x")', last_name='+cmd')
+		IDFNumber.objects.create(employee=self.emp, nrf='@SUM(1)')
+		self.login('admin')
+		text = b''.join(self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).streaming_content).decode('utf-8-sig')
+		self.assertIn('"\'=HYPERLINK(""http://x"") +cmd"', text)
+		self.assertIn("'@SUM(1)", text)
+		self.assertNotIn(',=HYPERLINK', text)
+		from openpyxl import load_workbook
+		ws = load_workbook(io.BytesIO(self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11, 'fmt': 'xlsx'}).content)).active
+		self.assertTrue(ws.cell(2, 2).value.startswith("'="))
+		self.assertTrue(ws.cell(2, 1).value.startswith("'@"))
+
+	def test_javascript_never_puts_server_text_into_innerhtml(self):
+		import pathlib
+		base = pathlib.Path(__file__).parent / 'static' / 'attendance' / 'qr'
+		kiosk = (base / 'kiosk.js').read_text(encoding='utf-8')
+		code_lines = [l for l in kiosk.splitlines() if '.innerHTML' in l and not l.strip().startswith(('/*', '*', '//'))]
+		self.assertEqual(len(code_lines), 1)
+		self.assertIn('<svg', code_lines[0])                                  # hanya ikon konstan
+		self.assertNotIn('localStorage', kiosk)                               # tidak ada kunci yang disimpan di sisi klien
+		self.assertNotIn('X-Kiosk-Key', kiosk)
+		self.assertNotIn('innerHTML', (base / 'charts.js').read_text(encoding='utf-8'))
+
+	# ---------- akses
+	def test_group_membership_is_not_limited_to_first_group(self):
+		self.login('funsionario', 'admin')                                    # grup yang berhak bukan yang pertama
+		self.assertEqual(self.client.get(reverse('qr-dash')).status_code, 200)
+		self.assertEqual(self.client.get(reverse('qr-cards')).status_code, 200)
+		self.assertEqual(self.client.get(reverse('qr-api-dash')).status_code, 200)
+
+	def test_forbidden_is_http_403_and_anonymous_is_redirected_to_login(self):
+		self.login('funsionario')
+		for name in ('qr-dash', 'qr-today', 'qr-report', 'qr-cards', 'qr-devices', 'qr-dash-chart'):
+			self.assertEqual(self.client.get(reverse(name)).status_code, 403, name)
+		self.client.logout()
+		r = self.client.get(reverse('qr-cards'))
+		self.assertEqual(r.status_code, 302)
+		self.assertTrue(r['Location'].startswith('/login/?next=') or 'next=' in r['Location'])
+
+	def test_state_changing_endpoints_need_post_and_csrf(self):
+		from django.test import Client
+		self.login('admin', name='csrfadmin')
+		c = Client(enforce_csrf_checks=True)
+		c.force_login(User.objects.get(username='csrfadmin'))
+		for name, args in [('qr-device-pair', []), ('qr-card-print', []), ('qr-card-action', []), ('qr-device-toggle', [1])]:
+			self.assertEqual(c.post(reverse(name, args=args), {}).status_code, 403, name)     # tanpa token CSRF ditolak
+			self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 405, name)
+		self.assertEqual(ScanDevice.objects.count(), 0)
+
+	def test_language_cookie_secure_flag_and_validation(self):
+		r = self.client.get(reverse('qr-lang', args=['pt']), {'next': '/attendance/qr/today/'}, secure=True)
+		self.assertTrue(r.cookies['mdi_lang']['secure'])
+		self.login('admin')
+		self.client.cookies['mdi_lang'] = '<script>alert(1)</script>'
+		self.assertContains(self.client.get(reverse('qr-today')), 'Absensia ohin')      # nilai asing -> bahasa bawaan (Tetun)
+
+	def test_sensitive_responses_are_not_cacheable(self):
+		self.login('admin')
+		self.pair()
+		self.assertEqual(self.client.post(reverse('qr-card-print'), {'ids': [self.emp.pk]})['Cache-Control'], 'no-store')
+		self.assertEqual(self.client.get(reverse('qr-api-dash'))['Cache-Control'], 'no-store')
+		self.assertEqual(self.client.get(reverse('qr-kiosk'))['Cache-Control'], 'no-store')
+
+	# ---------- pemeliharaan dan konfigurasi
+	def test_prune_scanlogs_command(self):
+		from django.core.management import call_command
+		now = timezone.now()
+		old = [ScanLog(scanned_at=now - datetime.timedelta(days=400 + i), code='in') for i in range(7)]
+		ScanLog.objects.bulk_create(old + [ScanLog(scanned_at=now - datetime.timedelta(days=3), code='in')])
+		out = io.StringIO()
+		call_command('prune_scanlogs', days=180, batch=3, stdout=out)
+		self.assertEqual(ScanLog.objects.count(), 1)
+		self.assertIn('7 baris', out.getvalue())
+
+	def _checks(self):
+		from django.core.checks import run_checks
+		return {m.id: m for m in run_checks() if m.id.startswith('attendance.')}
+
+	def test_system_checks_warn_about_risky_config(self):
+		ids = self._checks()
+		self.assertIn('attendance.W001', ids)                                   # QR_SECRET belum diisi
+		self.assertNotIn('attendance.W002', ids)                                # jaringan privat bawaan = aman
+		self.assertNotIn('attendance.W003', ids)
+		with override_settings(ATTENDANCE_QR_SECRET='rahasia-panjang'):
+			self.assertNotIn('attendance.W001', self._checks())
+		with override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=[], ATTENDANCE_REQUIRE_DEVICE_KEY=False):
+			ids = self._checks()
+			self.assertIn('attendance.W002', ids)
+			self.assertIn('attendance.W003', ids)
+
+	def test_system_checks_catch_invalid_values(self):
+		with override_settings(ATTENDANCE_TIME_ZONE='Mars/Olympus', ATTENDANCE_LATE_AFTER='25:99',
+							   ATTENDANCE_KIOSK_ALLOWED_IPS=['300.1.1.1']):
+			ids = self._checks()
+		self.assertEqual({'attendance.E001', 'attendance.E002', 'attendance.E003'} - set(ids), set())
+
+	def test_secret_isolated_from_secret_key(self):
+		with override_settings(ATTENDANCE_QR_SECRET='A'):
+			a = svc.make_payload(self.card)
+		with override_settings(ATTENDANCE_QR_SECRET='A', SECRET_KEY='lain-lagi'):
+			self.assertEqual(svc.parse_payload(a), (self.emp.pk, 1))             # SECRET_KEY diganti, kartu tetap berlaku
+		with override_settings(ATTENDANCE_QR_SECRET='B'):
+			self.assertIsNone(svc.parse_payload(a))
+
+
+class PerformanceTests(QRBase):
+	"""Anggaran query: tidak boleh bertambah seiring jumlah pegawai (tidak ada N+1)."""
+
+	def many(self, n):
+		out = []
+		for i in range(n):
+			e = self.make_employee('Peg%03d' % i, 'Uji')
+			IDFNumber.objects.create(employee=e, nrf='NRF%03d' % i)
+			out.append(e)
+		return out
+
+	def queries(self, fn):
+		with CaptureQueriesContext(connection) as q:
+			result = fn()
+		return len(q), result
+
+	def login_admin(self):
+		u = User.objects.create_user('perf', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+
+	def test_scan_query_budget(self):
+		self.pair()
+		svc.day_off_reason(MON)                                    # cache libur terisi (keadaan normal setelah scan pertama hari itu)
+		n, r = self.queries(lambda: self.scan(MON, 8))
+		self.assertEqual(r['code'], 'in')
+		self.assertLessEqual(n, 19, 'scan pertama memakai %d query' % n)
+		n, r = self.queries(lambda: self.scan(MON, 16, 5))
+		self.assertEqual(r['code'], 'out')
+		self.assertLessEqual(n, 14, 'scan pulang memakai %d query' % n)
+
+	def test_holiday_list_is_cached_on_scan_path_and_can_be_disabled(self):
+		self.scan(MON, 8)                                          # mengisi cache
+		NacionalHoliday.objects.create(name='Baru', date=MON + datetime.timedelta(days=1))
+		with CaptureQueriesContext(connection) as q:
+			svc.day_off_reason(MON + datetime.timedelta(days=1))
+		self.assertEqual(len(q), 0)                                # daftar libur dari cache, tanpa query
+		with override_settings(ATTENDANCE_HOLIDAY_CACHE_SECONDS=0):
+			self.assertEqual(svc.day_off_reason(MON + datetime.timedelta(days=1)), ('holiday', 'Baru'))
+
+	def test_rejected_scans_are_cheap(self):
+		n, _ = self.queries(lambda: svc.process_scan('sampah', now=at(MON, 8)))
+		self.assertLessEqual(n, 2)                                              # hanya catatan log
+		n, _ = self.queries(lambda: self.scan(SUN, 8))
+		self.assertLessEqual(n, 8, 'scan hari libur memakai %d query' % n)
+
+	def test_pages_do_not_grow_with_employee_count(self):
+		self.login_admin()
+		self.many(5)
+		small = {}
+		for name in ('qr-today', 'qr-cards', 'qr-report', 'qr-dash'):
+			cache.clear()
+			small[name] = self.queries(lambda: self.client.get(reverse(name), {'year': 2026, 'month': 11}))[0]
+		self.many(60)
+		for name in ('qr-today', 'qr-cards', 'qr-report', 'qr-dash'):
+			cache.clear()
+			big = self.queries(lambda: self.client.get(reverse(name), {'year': 2026, 'month': 11}))[0]
+			self.assertLessEqual(big, small[name] + 1, '%s: %d query untuk 6 pegawai, %d untuk 66' % (name, small[name], big))
+
+	def test_card_print_creates_cards_in_bulk(self):
+		self.login_admin()
+		emps = self.many(40)
+		n, r = self.queries(lambda: self.client.post(reverse('qr-card-print'), {'ids': [e.pk for e in emps]}))
+		self.assertEqual(r.status_code, 200)
+		self.assertEqual(QRCard.objects.count(), 41)
+		self.assertLessEqual(n, 14, 'cetak 40 kartu memakai %d query' % n)
+
+	def test_org_reports_are_cached_and_shared(self):
+		self.login_admin()
+		self.scan(MON, 8)
+		n1, _ = self.queries(lambda: self.client.get(reverse('qr-dash'), {'year': 2026, 'month': 11}))
+		n2, r = self.queries(lambda: self.client.get(reverse('qr-dash'), {'year': 2026, 'month': 11}))
+		self.assertLess(n2, n1 - 2, 'permintaan kedua (%d) harus jauh lebih ringan dari pertama (%d)' % (n2, n1))
+		# api grafik memakai hasil hitung yang sama (tanpa menghitung ulang seluruh pegawai)
+		n3, _ = self.queries(lambda: self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11}))
+		self.assertLess(n3, n1 - 2)
+
+	def test_cache_staleness_is_bounded_and_can_be_disabled(self):
+		self.login_admin()
+		url = reverse('qr-api-dash')
+		first = self.client.get(url, {'year': 2026, 'month': 11}).json()['divisions']['series'][1]['data']
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 9)):
+			self.scan(MON, 9, 0)                                              # terlambat
+		stale = self.client.get(url, {'year': 2026, 'month': 11}).json()['divisions']['series'][1]['data']
+		self.assertEqual(stale, first)                                         # masih hasil cache (maks. 60 detik)
+		with override_settings(ATTENDANCE_REPORT_CACHE_SECONDS=0):
+			fresh = self.client.get(url, {'year': 2026, 'month': 11}).json()['divisions']['series'][1]['data']
+		self.assertEqual(fresh, [1])
+
+	def test_cache_is_per_period_and_division(self):
+		self.login_admin()
+		other = Division.objects.create(code='D2', name='Divisi Dua')
+		a = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11}).json()['divisions']['label']
+		b = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11, 'div': other.pk}).json()['divisions']['label']
+		c = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 10}).json()['divisions']['label']
+		self.assertEqual((a, b, c), (['Divisi Satu'], [], ['Divisi Satu']))
+
+	def test_streaming_csv_and_static_versioning(self):
+		self.login_admin()
+		r = self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11})
+		self.assertTrue(r.streaming)
+		self.assertEqual(r['Content-Type'], 'text/csv; charset=utf-8')
+		from django.template import Context, Template
+		html = Template("{% load qr_i18n %}{% qr_static 'attendance/qr/qr.css' %}").render(Context())
+		self.assertRegex(html, r'attendance/qr/qr\.css\?v=\d+$')
+
+	def test_heavy_scripts_load_only_where_needed_and_deferred(self):
+		self.login_admin()
+		self.assertNotContains(self.client.get(reverse('qr-today')), 'highcharts')
+		self.assertNotContains(self.client.get(reverse('qr-dash')), 'highcharts')
+		html = self.client.get(reverse('qr-dash-chart')).content.decode()
+		self.assertIn('<script defer src="/static/main/js_custom/highcharts.js">', html)
+		self.assertIn('defer src="/static/attendance/qr/charts.js?v=', html)

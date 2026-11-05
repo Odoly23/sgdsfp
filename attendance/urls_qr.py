@@ -2,7 +2,7 @@ from django.urls import path
 from . import views_qr as v
 
 urlpatterns = [
-	# halaman kiosk (tanpa login; dibatasi jaringan kantor, kunci perangkat opsional)
+	# halaman kiosk (tanpa login; scan hanya dari jaringan kantor dan PC yang dipasangkan admin)
 	path('kiosk/', v.kiosk, name="qr-kiosk"),
 	path('kiosk/scan/', v.kiosk_scan, name="qr-kiosk-scan"),
 	path('kiosk/check/', v.kiosk_check, name="qr-kiosk-check"),
@@ -12,7 +12,7 @@ urlpatterns = [
 	path('today/', v.today, name="qr-today"),
 
 	path('devices/', v.devices, name="qr-devices"),
-	path('devices/add/', v.device_add, name="qr-device-add"),
+	path('devices/pair/', v.device_pair, name="qr-device-pair"),
 	path('devices/<int:pk>/toggle/', v.device_toggle, name="qr-device-toggle"),
 
 	path('cards/', v.cards, name="qr-cards"),

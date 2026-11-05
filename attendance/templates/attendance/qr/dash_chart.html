@@ -12,6 +12,6 @@
 </div>
 {% endblock %}
 {% block qr_scripts %}
-<script src="{% static 'main/js_custom/highcharts.js' %}"></script>
-<script src="{% static 'attendance/qr/charts.js' %}"></script>
+<script defer src="{% static 'main/js_custom/highcharts.js' %}"></script>
+<script defer src="{% qr_static 'attendance/qr/charts.js' %}"></script>
 {% endblock %}

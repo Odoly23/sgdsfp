@@ -155,15 +155,13 @@ body.kiosk { margin: 0; min-height: 100vh; min-height: 100dvh; background: var(-
 .k-chip.ok { background: #dff3e7; color: #146c3b; }
 .k-chip.err { background: #f8dcdc; color: var(--mdi-red-dk); }
 .k-foot { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; align-items: center; padding: 8px 12px 12px; font-size: .78rem; color: var(--mdi-mute); }
-.k-foot button, .k-setup button { cursor: pointer; border: 1px solid var(--mdi-silver); background: #fff; border-radius: 8px; padding: 10px 14px; min-height: 44px; }
+.k-foot button { cursor: pointer; border: 1px solid var(--mdi-silver); background: #fff; border-radius: 8px; padding: 10px 14px; min-height: 44px; }
 .k-cam { position: fixed; right: 12px; bottom: 64px; width: min(240px, 60vw); border-radius: 12px; border: 3px solid var(--mdi-red); display: none; background: #000; z-index: 20; }
 .k-setup { position: fixed; inset: 0; background: rgba(38,35,31,.82); display: none; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
 .k-setup.on { display: flex; }
-.k-setup form { background: #fff; padding: 22px; border-radius: 18px; width: min(440px, 100%); }
-.k-setup h2 { margin-top: 0; color: var(--mdi-red-dk); font-size: 1.3rem; }
-.k-setup input { width: 100%; padding: 12px; font-size: 1.1rem; border: 2px solid var(--mdi-silver); border-radius: 10px; margin: 10px 0; box-sizing: border-box; }
-.k-setup .k-err { color: var(--mdi-red-dk); min-height: 1.3em; }
-.k-setup .go { background: var(--mdi-red); color: #fff; border-color: var(--mdi-red); width: 100%; font-size: 1.05rem; }
+.k-pair { background: #fff; padding: 22px; border-radius: 18px; width: min(440px, 100%); }
+.k-pair h2 { margin-top: 0; color: var(--mdi-red-dk); font-size: 1.3rem; }
+.k-pair p { margin-bottom: 0; }
 
 /* ============================================================ kartu member CR80 85,6 x 54 mm */
 body.cardsheet { margin: 0; background: #e9e6df; font-family: 'Segoe UI', Tahoma, sans-serif; }
@@ -196,6 +194,14 @@ body.cardsheet { margin: 0; background: #e9e6df; font-family: 'Segoe UI', Tahoma
 body.only-front .mdi-card.back { display: none; }
 body.only-back .mdi-card.front { display: none; }
 @media (max-width: 350px) { .mdi-card { zoom: .85; } }   /* HP sangat kecil: kartu tetap muat tanpa geser */
+
+/* ============================================================ perangkat: layar berponi, sentuh, gerak */
+.k-top { padding-top: max(8px, env(safe-area-inset-top)); padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+.k-main { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+.k-foot { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+button, .btn, .qr-flag, .qr-subtabs a, .qr-tile { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+input, select, textarea { font-size: max(16px, 1rem); }      /* iOS tidak memperbesar halaman saat kolom diketuk */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
 /* ============================================================ layar lebih lebar */
 @media (min-width: 576px) {
@@ -261,6 +267,14 @@ body.only-back .mdi-card.front { display: none; }
 @media (min-width: 992px) {
 	.qr-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 	.qr-empcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ============================================================ layar sentuh (HP dan tablet, berapa pun lebarnya); sengaja di akhir agar menang atas aturan lebar layar */
+@media (pointer: coarse) {
+	.btn, .btn-sm, .qr-subtabs a, .qr-form .form-control, .qr-form .btn, .qr-toolbar .btn, .qr-actions .btn { min-height: 44px; }
+	.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+	.qr-checkall input, .qr-pick input, .ck { width: 22px; height: 22px; }
+	.qr-flag { min-width: 48px; min-height: 48px; }
 }
 
 @media print {

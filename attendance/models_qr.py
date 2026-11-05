@@ -58,3 +58,6 @@ class ScanLog(models.Model):
 	class Meta:
 		ordering = ['-scanned_at']
 		indexes = [models.Index(fields=['scanned_at'])]
+
+
+from attendance import qr_checks  # noqa: E402,F401  (mendaftarkan pemeriksaan konfigurasi: manage.py check)
