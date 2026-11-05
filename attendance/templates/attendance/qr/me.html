@@ -1,26 +1,23 @@
-{% extends 'main/layout.html' %}
+{% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
-{% block content %}
-{% include 'attendance/qr/_nav.html' %}
-<div class="qr-page">
-	<div class="qr-head"><div><h1>{% t 'me.title' %}</h1><p class="qr-sub">{{ monthname }} {{ year }}</p></div></div>
-	{% if not rep %}
-		<div class="qr-banner">{% t 'me.unlinked' %}</div>
-	{% else %}
-		<form method="get" class="qr-filter qr-card">
-			<div><label>{% t 'f.month' %}</label><select name="month">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
-			<div><label>{% t 'f.year' %}</label><select name="year">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
-			<button class="qr-btn" type="submit">{% t 'f.show' %}</button>
-		</form>
-		{% if row %}
-		<div class="qr-tiles">
-			<div class="qr-tile ok"><b>{{ row.totals.present }}</b><span>{% t 'tile.present' %}</span></div>
-			<div class="qr-tile warn"><b>{{ row.totals.late }}</b><span>{% t 'tile.late' %}</span></div>
-			<div class="qr-tile leave"><b>{{ row.totals.leave }}</b><span>{% t 'tile.leave' %}</span></div>
-			<div class="qr-tile"><b>{{ row.totals.absent }}</b><span>{% t 'tile.absent' %}</span></div>
-		</div>
-		{% endif %}
-		<div class="qr-card">{% include 'attendance/qr/_grid.html' with rows=rep.rows %}</div>
+{% block qr_body %}
+<h3 align="center">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
+{% if not rep %}
+	<div class="alert alert-warning p-2">{% t 'me.unlinked' %}</div>
+{% else %}
+	<form method="get" class="form-inline mb-3 justify-content-center">
+		<select name="month" class="form-control form-control-sm mr-2" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+		<select name="year" class="form-control form-control-sm mr-2" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+		<button class="btn btn-sm btn-info" type="submit">{% t 'f.show' %}</button>
+	</form>
+	{% if row %}
+	<div class="row text-center mb-3">
+		<div class="col-sm"><div class="qr-stat border-success"><h3 class="mb-0 text-success">{{ row.totals.present }}</h3><small>{% t 'tile.present' %}</small></div></div>
+		<div class="col-sm"><div class="qr-stat border-warning"><h3 class="mb-0 text-warning">{{ row.totals.late }}</h3><small>{% t 'tile.late' %}</small></div></div>
+		<div class="col-sm"><div class="qr-stat border-info"><h3 class="mb-0 text-info">{{ row.totals.leave }}</h3><small>{% t 'tile.leave' %}</small></div></div>
+		<div class="col-sm"><div class="qr-stat border-danger"><h3 class="mb-0 text-danger">{{ row.totals.absent }}</h3><small>{% t 'tile.absent' %}</small></div></div>
+	</div>
 	{% endif %}
-</div>
+	{% include 'attendance/qr/_grid.html' with rows=rep.rows %}
+{% endif %}
 {% endblock %}

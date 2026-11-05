@@ -22,57 +22,11 @@
 .qr-flag:hover { background: #fff; text-decoration: none; color: var(--mdi-ink); }
 .qr-flag.on { border-color: var(--mdi-red); background: #fff; color: var(--mdi-red-dk); }
 
-/* ---------- halaman admin ---------- */
-.qr-page { color: var(--mdi-ink); padding: 18px 4px 40px; }
-.qr-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
-.qr-head h1 { font-size: 1.5rem; font-weight: 700; margin: 0; }
-.qr-head h1::before { content: ""; display: inline-block; width: 6px; height: 1.1em; background: var(--mdi-red); border-radius: 3px; margin-right: 10px; vertical-align: -0.18em; }
-.qr-sub { color: var(--mdi-mute); font-size: .92rem; margin: 2px 0 0; }
-.qr-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-.qr-nav { align-items: center; }
-.qr-nav .qr-flags { margin-left: auto; }
-.qr-nav a:not(.qr-flag) { padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid #ddd8cf; color: var(--mdi-ink); font-size: .9rem; text-decoration: none; }
-.qr-nav a:not(.qr-flag):hover { border-color: var(--mdi-red); color: var(--mdi-red-dk); text-decoration: none; }
-.qr-nav a:not(.qr-flag).on { background: var(--mdi-red); border-color: var(--mdi-red); color: #fff; }
-
-.qr-card { background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.05); margin-bottom: 18px; }
-.qr-card h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px; }
-
-.qr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.qr-tile { background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 14px 16px; border-top: 4px solid var(--mdi-silver); }
-.qr-tile b { display: block; font-size: 1.9rem; line-height: 1.1; }
-.qr-tile span { color: var(--mdi-mute); font-size: .85rem; }
-.qr-tile.ok { border-top-color: var(--st-ok); }
-.qr-tile.warn { border-top-color: var(--st-warn); }
-.qr-tile.leave { border-top-color: var(--st-leave); }
-.qr-tile.wait { border-top-color: var(--mdi-silver); }
-
-.qr-banner.sec { background: #fdecec; border-color: #f0b4b4; color: var(--mdi-red-dk); }
-.qr-banner { padding: 12px 16px; border-radius: 12px; background: #fff4e5; border: 1px solid #f3d29b; margin-bottom: 18px; }
-
-.qr-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
-.qr-filter label { display: block; font-size: .78rem; color: var(--mdi-mute); margin: 0 0 3px; }
-.qr-filter select, .qr-filter input[type=text] { min-width: 150px; padding: 8px 10px; border: 1px solid #d6d1c7; border-radius: 8px; background: #fff; }
-
-.qr-btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--mdi-red); background: var(--mdi-red); color: #fff; font-size: .9rem; cursor: pointer; text-decoration: none; }
-.qr-btn:hover { background: var(--mdi-red-dk); border-color: var(--mdi-red-dk); color: #fff; text-decoration: none; }
-.qr-btn.ghost { background: #fff; color: var(--mdi-red-dk); }
-.qr-btn.ghost:hover { background: #fdecec; color: var(--mdi-red-dk); }
-.qr-btn.sm { padding: 4px 10px; font-size: .8rem; }
-
-.qr-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-.qr-table th { text-align: left; color: var(--mdi-mute); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; padding: 8px 10px; border-bottom: 2px solid #e6e1d8; }
-.qr-table td { padding: 9px 10px; border-bottom: 1px solid #eee9e0; vertical-align: middle; }
-.qr-table tr:hover td { background: #faf8f4; }
-.qr-scroll { overflow-x: auto; }
-
-.qr-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 600; background: #eee9e0; color: var(--mdi-ink); }
-.qr-chip.ok { background: #dff3e7; color: #146c3b; }
-.qr-chip.warn { background: #fdf0d2; color: #8a5a00; }
-.qr-chip.err { background: #f8dcdc; color: var(--mdi-red-dk); }
-.qr-chip.leave { background: #dce8fd; color: #1d4ed8; }
-
-.qr-key { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.05rem; padding: 12px 14px; background: #fff8e1; border: 2px dashed var(--st-warn); border-radius: 10px; word-break: break-all; user-select: all; }
+/* ---------- halaman admin: kerangka Bootstrap sama seperti halaman absensia lama ---------- */
+.qr-toolbar { margin-bottom: 4px; }
+.qr-toolbar .btn { margin-bottom: 4px; }
+.qr-stat { border: 1px solid #dee2e6; border-top-width: 4px; border-radius: 4px; padding: 10px 8px; background: #fff; }
+.qr-key { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.05rem; padding: 10px 12px; background: #fff; border: 2px dashed #d98e04; border-radius: 6px; word-break: break-all; user-select: all; }
 
 /* ---------- rekap ---------- */
 .rp-table { border-collapse: separate; border-spacing: 0; font-size: .78rem; }

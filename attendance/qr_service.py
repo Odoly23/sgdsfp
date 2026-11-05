@@ -280,11 +280,27 @@ def _first_scan(emp, div, present, device, now, local, today, lang):
 			continue
 	if att is None:
 		return _result(False, 'busy', 'error', emp, lang)
+	_ensure_month_row(div, today)
 	AttendanceTime.objects.create(attendance=att, check_in=now, check_out=now if after_noon else None,
 								  is_late=late, device=device)
 	if late:
 		return _result(True, 'in_late', 'warn', emp, lang, time=hhmm(now), limit=conf('LATE_AFTER'))
 	return _result(True, 'in', 'success', emp, lang, time=hhmm(now))
+
+
+def _ensure_month_row(div, today):
+	"""Alur manual membuat AttendanceDiv (untuk unggah PDF, konfirmasi, final) saat hari pertama disimpan.
+	Scan melakukan hal yang sama supaya bulan itu muncul lengkap di daftar absensi lama."""
+	if not div or AttendanceDiv.objects.filter(div=div, year=today.year, month=today.month).exists():
+		return
+	for _ in range(3):
+		newid, _hash = getnewid(AttendanceDiv)
+		try:
+			with transaction.atomic():
+				AttendanceDiv.objects.create(id=newid, div=div, year=today.year, month=today.month)
+			return
+		except IntegrityError:
+			continue
 
 
 def _next_scan(emp, att, st, present, now, local, lang):

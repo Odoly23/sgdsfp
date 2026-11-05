@@ -1,41 +1,39 @@
-{% extends 'main/layout.html' %}
+{% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
-{% block content %}
-{% include 'attendance/qr/_nav.html' %}
-<div class="qr-page">
-	<div class="qr-head"><div><h1>{% t 'cards.title' %}</h1><p class="qr-sub">{% t 'cards.sub' %}</p></div></div>
-	<form method="get" class="qr-filter qr-card">
-		<div><label>{% t 'f.division' %}</label><select name="div"><option value="">{% t 'f.all_div' %}</option>
-			{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
-		<div><label>{% t 'f.search' %}</label><input type="text" name="q" value="{{ q }}"></div>
-		<button class="qr-btn" type="submit">{% t 'f.show' %}</button>
-	</form>
-	{% if limited %}<div class="qr-banner">{% t 'cards.limit' %}</div>{% endif %}
-	<form method="post" id="cardform">{% csrf_token %}
-	<div class="qr-card">
-		<div class="qr-filter">
-			<button class="qr-btn" type="submit" formaction="{% url 'qr-card-print' %}" formtarget="_blank">{% t 'btn.print' %}</button>
-			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="printed">{% t 'btn.printed' %}</button>
-			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="regen"
-				onclick="return confirm('{% t 'regen.confirm' %}')">{% t 'btn.regen' %}</button>
-			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="toggle">{% t 'btn.toggle' %}</button>
-		</div>
-		<div class="qr-scroll"><table class="qr-table">
-			<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
-				<th>{% t 'th.name' %}</th><th>{% t 'th.nrf' %}</th><th>{% t 'th.position' %}</th><th>{% t 'th.division' %}</th><th>{% t 'th.qr' %}</th></tr></thead>
-			<tbody>
-			{% for p in people %}
-				<tr><td><input class="ck" type="checkbox" name="ids" value="{{ p.id }}"></td>
-					<td>{{ p.name }}</td><td>{{ p.nrf|default:"-" }}</td><td>{{ p.position|default:"-" }}</td><td>{{ p.division|default:"-" }}</td>
-					<td>{% if not p.qr %}<span class="qr-chip">{% t 'qr.none' %}</span>
-						{% elif not p.qr.is_active %}<span class="qr-chip err">{% t 'qr.off' %}</span>
-						{% elif p.printed %}<span class="qr-chip ok">{% t 'qr.printed' %}</span>
-						{% else %}<span class="qr-chip warn">{% t 'qr.notprinted' %}</span>{% endif %}</td></tr>
-			{% empty %}<tr><td colspan="6" class="qr-sub">{% t 'cards.empty' %}</td></tr>
-			{% endfor %}
-			</tbody>
-		</table></div>
+{% block qr_body %}
+<p class="text-muted">{% t 'cards.sub' %}</p>
+<form method="get" class="form-inline mb-3">
+	<label class="mr-2" for="f-div">{% t 'f.division' %}</label>
+	<select id="f-div" name="div" class="form-control form-control-sm mr-3"><option value="">{% t 'f.all_div' %}</option>
+		{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>
+	<input type="text" name="q" value="{{ q }}" class="form-control form-control-sm mr-2" placeholder="{% t 'f.search' %}">
+	<button class="btn btn-sm btn-info" type="submit">{% t 'f.show' %}</button>
+</form>
+{% if limited %}<div class="alert alert-warning p-2">{% t 'cards.limit' %}</div>{% endif %}
+<form method="post" id="cardform">{% csrf_token %}
+	<div class="mb-2">
+		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-print' %}" formtarget="_blank">{% t 'btn.print' %} <i class="fa fa-print"></i></button>
+		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="printed">{% t 'btn.printed' %}</button>
+		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="regen"
+			onclick="return confirm('{% t 'regen.confirm' %}')">{% t 'btn.regen' %}</button>
+		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="toggle">{% t 'btn.toggle' %}</button>
 	</div>
-	</form>
-</div>
+	<div class="table-responsive">
+	<table class="table table-sm table-striped">
+		<thead><tr align="center"><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
+			<th>{% t 'th.name' %}</th><th>{% t 'th.nrf' %}</th><th>{% t 'th.position' %}</th><th>{% t 'th.division' %}</th><th>{% t 'th.qr' %}</th></tr></thead>
+		<tbody>
+		{% for p in people %}
+			<tr align="center"><td><input class="ck" type="checkbox" name="ids" value="{{ p.id }}"></td>
+				<td align="left">{{ p.name }}</td><td>{{ p.nrf|default:"-" }}</td><td>{{ p.position|default:"-" }}</td><td>{{ p.division|default:"-" }}</td>
+				<td>{% if not p.qr %}<span class="badge badge-secondary">{% t 'qr.none' %}</span>
+					{% elif not p.qr.is_active %}<span class="badge badge-danger">{% t 'qr.off' %}</span>
+					{% elif p.printed %}<span class="badge badge-success">{% t 'qr.printed' %}</span>
+					{% else %}<span class="badge badge-warning">{% t 'qr.notprinted' %}</span>{% endif %}</td></tr>
+		{% empty %}<tr><td colspan="6" class="text-center text-muted">{% t 'cards.empty' %}</td></tr>
+		{% endfor %}
+		</tbody>
+	</table>
+	</div>
+</form>
 {% endblock %}

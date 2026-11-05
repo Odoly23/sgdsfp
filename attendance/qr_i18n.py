@@ -60,6 +60,8 @@ MESSAGES = {
 	'nav.devices': ('Aparelu kiosk', 'Kiosk devices', 'Perangkat kiosk', 'Dispositivos do quiosque'),
 	'nav.me': ('Ha\'u nia absensia', 'My attendance', 'Absensi saya', 'A minha assiduidade'),
 	'nav.kiosk': ('Loke ekran kiosk', 'Open kiosk screen', 'Buka layar kiosk', 'Abrir ecrã do quiosque'),
+	'nav.qr': ('Absensia QR', 'QR attendance', 'Absensi QR', 'Assiduidade QR'),
+	'crumb.panel': ('Painel absensia', 'Attendance panel', 'Panel absensi', 'Painel de assiduidade'),
 	'lang.label': ('Lian', 'Language', 'Bahasa', 'Idioma'),
 
 	# ---------------------------------------------------------------- hasil scan (server)
@@ -207,8 +209,8 @@ MESSAGES = {
 
 	# ---------------------------------------------------------------- hari ini
 	'today.title': ('Absensia ohin', 'Attendance today', 'Absensi hari ini', 'Assiduidade de hoje'),
-	'today.sub': ('{date} · pájina ne\'e atualiza an kada segundu 30', '{date} · this page refreshes every 30 seconds',
-		'{date} · halaman ini menyegarkan diri tiap 30 detik', '{date} · esta página atualiza-se a cada 30 segundos'),
+	'today.refresh': ('Pájina ne\'e atualiza an kada segundu 30', 'This page refreshes every 30 seconds',
+		'Halaman ini menyegarkan diri tiap 30 detik', 'Esta página atualiza-se a cada 30 segundos'),
 	'today.off': ('Ohin laos loron servisu: {reason}. Scan sei rejeita.', 'Today is not a workday: {reason}. Scans will be rejected.',
 		'Hari ini bukan hari kerja: {reason}. Scan akan ditolak.', 'Hoje não é dia útil: {reason}. As leituras serão rejeitadas.'),
 	'tile.scanned': ('Scan ona', 'Scanned', 'Sudah scan', 'Já leram'),
@@ -313,6 +315,8 @@ MESSAGES = {
 
 	# ---------------------------------------------------------------- rekap
 	'rep.title': ('Rezumu absensia', 'Attendance report', 'Rekap absensi', 'Relatório de assiduidade'),
+	'rep.heading': ('ABSENSIA FULAN {month} TINAN {year}', 'ATTENDANCE FOR {month} {year}',
+		'ABSENSI BULAN {month} TAHUN {year}', 'ASSIDUIDADE DE {month} DE {year}'),
 	'rep.all': ('diresaun hotu', 'all divisions', 'semua divisi', 'todas as direções'),
 	'legend.present': ('Presensa', 'Present', 'Hadir', 'Presente'),
 	'legend.late': ('Presensa, tardi', 'Present, late', 'Hadir, terlambat', 'Presente, com atraso'),

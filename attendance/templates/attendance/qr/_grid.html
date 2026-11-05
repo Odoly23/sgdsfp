@@ -4,7 +4,7 @@
 	<span><i class="rp-L"></i>{% t 'legend.leave' %}</span><span><i class="rp-F"></i>{% t 'legend.absent' %}</span><span><i class="rp-W"></i>{% t 'legend.off' %}</span>
 	<span>{% t 'legend.flags' %}</span>
 </div>
-<div class="qr-scroll"><table class="rp-table">
+<div class="table-responsive"><table class="rp-table">
 	<thead><tr><th class="rp-name">{% t 'th.emp' %}</th>
 		{% for d in rep.days %}<th>{{ d }}</th>{% endfor %}
 		<th>{% t 'th.workdays' %}</th><th>{% t 'th.present' %}</th><th>{% t 'th.late' %}</th><th>{% t 'th.leave' %}</th><th>{% t 'th.absent' %}</th></tr></thead>
@@ -18,7 +18,7 @@
 			</td>
 		{% endfor %}
 		<td>{{ r.totals.workdays }}</td><td><b>{{ r.totals.present }}</b></td><td>{{ r.totals.late }}</td><td>{{ r.totals.leave }}</td><td>{{ r.totals.absent }}</td></tr>
-	{% empty %}<tr><td colspan="40" class="qr-sub" style="text-align:left;padding:14px">{% t 'grid.empty' %}</td></tr>
+	{% empty %}<tr><td colspan="40" class="text-muted text-left p-3">{% t 'grid.empty' %}</td></tr>
 	{% endfor %}
 	</tbody>
 </table></div>

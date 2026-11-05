@@ -14,7 +14,7 @@ attendance/qr_i18n.py          semua teks 4 bahasa (Tetun, English, Indonesia, P
 attendance/views_qr.py         halaman kiosk, hari ini, kartu, perangkat, rekap, ganti bahasa
 attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %})
-attendance/tests_qr.py         71 tes otomatis
+attendance/tests_qr.py         78 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, mdi-logo.jpg)
 ```
@@ -78,9 +78,20 @@ halaman admin menampilkan peringatan merah. Isi dengan alamat jaringan kantor (C
 Jika server di belakang Nginx/proxy, set `ATTENDANCE_TRUST_PROXY_HEADER = True`; alamat klien diambil dari entri
 **paling kanan** `X-Forwarded-For` (yang ditambahkan proxy Anda, tidak bisa dipalsukan klien).
 
-## 4. Menu dan bendera bahasa
+## 4. Pintu masuk, menu, dan bendera bahasa
 
-Menu (mis. di `adm.html`), gaya sama dengan menu lama:
+Halaman QR memakai kerangka yang sama dengan halaman absensia lama (breadcrumb "PAINEL ABSENSIA / ...", kartu
+berbayang, tombol `btn-info`, tabel `table-striped`). Breadcrumb menaut ke `attendance-dash`.
+
+**Tombol di Painel Absensia** (`attendance/dash.html`): tempel satu baris di samping tombol Relatoriu Absensia
+dan Konfigurasaun:
+```html
+<a class="btn btn-sm btn-info" href="{% url 'attendance-div-list' ... %}">...</a>   <!-- yang sudah ada -->
+{% include 'attendance/qr/_dash_button.html' %}                                      <!-- baru: tombol "Absensia QR" -->
+```
+Tombol itu membuka **Hari ini**; dari sana ada tombol ke Rekap, Kartu QR, dan Perangkat kiosk. Tombolnya ikut 4 bahasa.
+
+**Menu navbar (opsional)**, mis. di `adm.html`:
 ```html
 <li class="nav-item dropdown active">
 	<a class="nav-link dropdown-toggle" href="#" data-toggle="dropdown"><i class="fa fa-qrcode"></i> ABSENSI QR</a>
@@ -127,6 +138,16 @@ Empat bahasa: **Tetun (TET), English (EN), Indonesia (ID), Português (PT)**. Ba
   libur/cuti dari database tidak diterjemahkan.
 - Semua teks ada di `qr_i18n.py` (`MESSAGES`). Tes memastikan setiap kunci punya keempat bahasa dan placeholder yang sama.
   **Teks Tetun sebaiknya dibaca ulang oleh penutur asli** sebelum dipakai resmi.
+
+## Hubungan dengan absensi manual dan Ativa Tinan / Ativa Fulan
+
+- Scan **memakai tanggal sebenarnya** dan tidak membaca Ativa Tinan / Ativa Fulan. Daftar absensia lama menampilkan
+  bulan yang diaktifkan di Konfigurasaun, jadi admin tetap perlu mengaktifkan bulan baru agar data scan bulan itu
+  terlihat di daftar lama. Rekap bulanan QR tidak bergantung pada pengaktifan itu.
+- Scan pertama pada satu bulan membuat baris `AttendanceDiv` (divisi, tahun, bulan) bila belum ada, sama seperti
+  alur manual, sehingga unggah PDF, Konfirmasi, dan Konfirmasi final bulan itu tetap bisa dipakai.
+- Baris `Attendance` dari scan memakai status P (hadir). Daftar lama menampilkan status itu seperti biasa; jam masuk
+  dan pulang hanya terlihat di halaman QR (Hari ini, Rekap).
 
 ## Aturan yang berlaku
 

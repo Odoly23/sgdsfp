@@ -79,6 +79,32 @@ class ScanFlowTests(QRBase):
 		self.assertFalse(a.scantime.is_late)
 		self.assertEqual(res['employee']['name'], 'Maria Silva')
 
+	def test_first_scan_creates_month_row_once_like_manual_flow(self):
+		self.scan(MON, 8, 0)
+		row = AttendanceDiv.objects.get()
+		self.assertEqual((row.div, row.year, row.month, row.is_confirm, row.is_final), (self.div, 2026, 11, False, False))
+		other = self.make_employee('Jose', 'Costa')
+		self.scan(MON, 8, 5, payload=svc.make_payload(QRCard.objects.create(employee=other)))
+		self.assertEqual(AttendanceDiv.objects.count(), 1)               # tidak ganda
+		self.scan(MON + datetime.timedelta(days=1), 8, 0)
+		self.assertEqual(AttendanceDiv.objects.count(), 1)
+
+	def test_existing_month_row_is_left_untouched(self):
+		AttendanceDiv.objects.create(id=7, div=self.div, year=2026, month=11, is_confirm=True)
+		self.scan(MON, 8, 0)
+		row = AttendanceDiv.objects.get()
+		self.assertEqual((row.id, row.is_confirm), (7, True))
+
+	def test_no_month_row_for_employee_without_division(self):
+		EmployeeDivision.objects.filter(employee=self.emp).update(division=None)
+		self.assertEqual(self.scan(MON, 8)['code'], 'in')
+		self.assertEqual(AttendanceDiv.objects.count(), 0)
+
+	def test_scan_ignores_active_year_and_month_settings(self):
+		Year.objects.create(year=2026, is_active=True)      # bulan aktif manual tidak memengaruhi scan
+		self.assertEqual(self.scan(MON, 8)['code'], 'in')
+		self.assertEqual(Attendance.objects.get().date, MON)
+
 	def test_boundary_0815_is_not_late_0816_is(self):
 		self.assertEqual(self.scan(MON, 8, 15)['code'], 'in')
 		Attendance.objects.all().delete()
@@ -497,6 +523,20 @@ class I18nTests(QRBase):
 			self.assertEqual(len(i18n.MONTHS[lang]), 12)
 			self.assertEqual(len(i18n.WEEKDAYS[lang]), 7)
 
+	def test_pages_follow_old_attendance_page_structure(self):
+		self.login_admin()
+		html = self.client.get(reverse('qr-today')).content.decode()
+		for marker in ['breadcrumb-holder', 'card shadow-lg pt-1 border-primary rounded', 'card-header', 'btn btn-sm btn-info',
+					   'table table-sm table-striped', reverse('attendance-dash')]:
+			self.assertIn(marker, html)
+
+	def test_dash_button_snippet(self):
+		from django.template.loader import render_to_string
+		html = render_to_string('attendance/qr/_dash_button.html', {}, request=__import__('django.test', fromlist=['x']).RequestFactory().get('/'))
+		self.assertIn(reverse('qr-today'), html)
+		self.assertIn('btn btn-sm btn-info', html)
+		self.assertIn('Absensia QR', html)
+
 	def test_every_key_used_in_templates_and_code_exists(self):
 		import pathlib, re
 		from attendance import qr_i18n as i18n
@@ -545,6 +585,7 @@ class I18nTests(QRBase):
 		r = self.client.get(reverse('qr-lang', args=['zz']), {'next': '/attendance/qr/today/'})
 		self.assertNotIn('mdi_lang', r.cookies)
 
+	@override_settings(ATTENDANCE_LANG_IN_NAVBAR=False)
 	def test_admin_pages_render_in_each_language(self):
 		from attendance import qr_i18n as i18n
 		self.login_admin()
@@ -559,6 +600,7 @@ class I18nTests(QRBase):
 				self.assertContains(r, 'class="qr-flag')
 			self.assertContains(self.client.get(reverse('qr-report')), i18n.month_name(MON.month, lang))
 
+	@override_settings(ATTENDANCE_LANG_IN_NAVBAR=False)
 	def test_flags_are_links_that_mark_current_language(self):
 		self.login_admin()
 		self.client.cookies['mdi_lang'] = 'pt'
@@ -569,10 +611,19 @@ class I18nTests(QRBase):
 		self.assertEqual(html.count('qr-flag on'), 1)
 		self.assertIn('qr-flag on" href="/attendance/qr/lang/pt/', html)
 
+	def _card_body(self):
+		html = self.client.get(reverse('qr-today')).content.decode()
+		return html[html.index('<div class="card-body">'):]
+
+	@override_settings(ATTENDANCE_LANG_IN_NAVBAR=False)
+	def test_flags_in_page_toolbar_until_navbar_snippet_is_installed(self):
+		self.login_admin()
+		self.assertIn('qr-flags', self._card_body())
+
 	@override_settings(ATTENDANCE_LANG_IN_NAVBAR=True)
 	def test_flags_hidden_in_page_when_navbar_has_them(self):
 		self.login_admin()
-		self.assertNotContains(self.client.get(reverse('qr-today')), 'qr-flags')
+		self.assertNotIn('qr-flags', self._card_body())
 
 	def test_navbar_snippet_renders_flags(self):
 		from django.template.loader import render_to_string

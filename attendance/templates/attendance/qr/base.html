@@ -1,0 +1,30 @@
+{% extends 'main/layout.html' %}
+{% load static qr_i18n %}
+{% comment %}Kerangka halaman absensi QR: sama dengan halaman absensia lama (breadcrumb + kartu + tombol btn-info).{% endcomment %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
+<div class="breadcrumb-holder">
+	<div class="container-fluid">
+		<ul class="breadcrumb">
+			<li class="breadcrumb-item"><a href="{% url 'attendance-dash' %}">{% t 'crumb.panel' %}</a></li>
+			<li class="breadcrumb-item active" aria-current="page">{{ legend|upper }}</li>
+		</ul>
+	</div>
+</div>
+<div class="container-fluid"><br/>
+	<div class="row">
+		<div class="col-sm-12">
+			<div class="card shadow-lg pt-1 border-primary rounded">
+				<div class="card-header">{{ legend|upper }}</div>
+				<div class="card-body">
+					{% include 'attendance/qr/_nav.html' %}
+					{% if security_open and can_manage %}<div class="alert alert-danger p-2 mb-2">{% t 'sec.warn' %}</div>{% endif %}
+					<hr/>
+					{% block qr_body %}{% endblock %}
+				</div> <!--end card-body-->
+			</div> <!--end card-->
+		</div> <!--end col-->
+	</div> <!--end row-->
+</div> <!--end container-->
+{% endblock %}
+{% block scripts %}{% block qr_scripts %}{% endblock %}{% endblock %}
