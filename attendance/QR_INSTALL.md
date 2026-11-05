@@ -127,6 +127,24 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
 Kunci perangkat masih ada sebagai pilihan (menu **Perangkat kiosk** + `ATTENDANCE_REQUIRE_DEVICE_KEY = True`).
 Kamera hanya cadangan (tombol "Pakai kamera", Chrome/Edge) dan butuh HTTPS atau `localhost`.
 
+## 6. Topbar: ganti MCI-HRMS menjadi MDI-HRMS dan warna merah MDI
+
+Ini ada di berkas proyek Anda, bukan di berkas absensi QR. Cari semua tulisan lama di template:
+```bash
+grep -rn "MCI-HRMS" --include="*.html" .
+```
+Ganti semuanya (topbar, judul tab, footer, halaman login) dengan satu perintah, lalu periksa hasilnya dengan `git diff`:
+```bash
+grep -rl "MCI-HRMS" --include="*.html" . | xargs sed -i 's/MCI-HRMS/MDI-HRMS/g'
+```
+Warna topbar ada di `main/templates/main/navbar.html`, pada tag `<nav class="navbar ... fixed-top" style="background-color: ...">`.
+Ganti nilainya dengan merah MDI:
+```html
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top" style="background-color: #e3171e;">
+```
+Warna yang dipakai fitur QR: merah `#e3171e`, merah gelap `#a80f14` (untuk hover), abu perak `#b8b4aa`.
+Kalau mau topbar sedikit lebih gelap supaya teks putih lebih terbaca, pakai `#c8141a`.
+
 ## Bahasa
 
 Empat bahasa: **Tetun (TET), English (EN), Indonesia (ID), Português (PT)**. Bawaan Tetun (`ATTENDANCE_DEFAULT_LANG`).
