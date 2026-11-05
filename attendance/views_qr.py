@@ -9,10 +9,12 @@ import qrcode.image.svg
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count
+from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -21,10 +23,10 @@ from custom.models import Division
 from employee.models import Employee, EmployeeCard, EmployeeUser
 from leave.models import Leaves
 from settings_app.decorators import allowed_users
-from settings_app.utils import f_monthname
+from attendance import qr_i18n as i18n
 from attendance import qr_service as svc
 from attendance.models import Attendance
-from attendance.models_qr import AttendanceTime, QRCard, ScanDevice, ScanLog
+from attendance.models_qr import QRCard, ScanDevice, ScanLog
 
 
 def _groups(name, default):
@@ -42,10 +44,20 @@ def _group(request):
 	return request.user.groups.all()[0].name if request.user.groups.exists() else ''
 
 
-def _page(request, title, **extra):
+def _lang(request):
+	return i18n.get_lang(request)
+
+
+def _tr(request, key, **params):
+	return i18n.tr(_lang(request), key, **params)
+
+
+def _page(request, title_key, **extra):
 	g = _group(request)
-	ctx = {'group': g, 'title': title, 'legend': title,
-		   'can_manage': g in MANAGERS, 'can_view': g in VIEWERS, 'can_device': g in DEVICE_ADMINS}
+	title = _tr(request, title_key)
+	ctx = {'group': g, 'title': title, 'legend': title, 'lang': _lang(request),
+		   'can_manage': g in MANAGERS, 'can_view': g in VIEWERS, 'can_device': g in DEVICE_ADMINS,
+		   'security_open': svc.security_is_open(), 'navbar_lang': bool(_groups('LANG_IN_NAVBAR', False))}
 	ctx.update(extra)
 	return ctx
 
@@ -54,12 +66,30 @@ def _local_today():
 	return svc.to_local(timezone.now()).date()
 
 
+def _months(lang):
+	return [(i, i18n.month_name(i, lang)) for i in range(1, 13)]
+
+
+# ============================================================ bahasa
+
+def set_lang(request, code):
+	"""Dipakai tombol bendera di halaman server: simpan pilihan di cookie lalu kembali ke halaman asal."""
+	nxt = request.GET.get('next', '')
+	if not url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+		nxt = reverse('qr-kiosk')
+	resp = redirect(nxt)
+	if code in i18n.LANGS:
+		resp.set_cookie(i18n.COOKIE, code, max_age=i18n.COOKIE_AGE, samesite='Lax')
+	return resp
+
+
 # ============================================================ kiosk (halaman scan)
 
 def kiosk(request):
-	"""Halaman layar penuh untuk PC pintu kantor. Tanpa login: yang dilindungi adalah kunci perangkat."""
+	"""Halaman layar penuh untuk PC pintu kantor. Tanpa login dan tanpa setup: colok scanner USB, langsung jalan."""
 	return render(request, 'attendance/qr/kiosk.html', {
 		'tz': svc.conf('TIME_ZONE'), 'late_after': svc.conf('LATE_AFTER'), 'work_end': svc.conf('WORK_END'),
+		'bundle': i18n.kiosk_bundle(), 'lang': _lang(request), 'langs': i18n.LANGS,
 	})
 
 
@@ -67,30 +97,47 @@ def _device_from(request):
 	return svc.get_device(request.headers.get('X-Kiosk-Key', ''))
 
 
+def _error(request_lang, code, status):
+	return JsonResponse({'ok': False, 'code': code, 'level': 'error', 'employee': None,
+						 'title': i18n.tr(request_lang, 'res.%s.title' % code),
+						 'message': i18n.tr(request_lang, 'res.%s.msg' % code)}, status=status)
+
+
 @csrf_exempt
 @require_POST
 def kiosk_scan(request):
-	device = _device_from(request)
-	if not device:
-		return JsonResponse({'ok': False, 'code': 'device', 'level': 'error', 'title': 'Perangkat belum terdaftar',
-							 'message': 'Kunci perangkat salah atau dinonaktifkan. Hubungi admin.'}, status=401)
 	try:
-		code = json.loads(request.body.decode() or '{}').get('code', '')
+		body = json.loads(request.body.decode() or '{}')
+		if not isinstance(body, dict):
+			body = {}
 	except (ValueError, UnicodeDecodeError):
-		code = ''
+		body = {}
+	lang = i18n.norm(body.get('lang'))
+	ip = svc.client_ip(request)
+	if not svc.ip_allowed(ip):
+		return _error(lang, 'net', 403)
+	device = _device_from(request)
+	if svc.conf('REQUIRE_DEVICE_KEY') and not device:
+		return _error(lang, 'device', 401)
+	code = body.get('code', '')
 	if not isinstance(code, str) or len(code) > 200:
 		code = ''
-	timezone_now = timezone.now()
-	if not device.last_seen or (timezone_now - device.last_seen).total_seconds() > 60:
-		ScanDevice.objects.filter(pk=device.pk).update(last_seen=timezone_now)
-	res = svc.process_scan(code, device=device)
+	if device:
+		now = timezone.now()
+		if not device.last_seen or (now - device.last_seen).total_seconds() > 60:
+			ScanDevice.objects.filter(pk=device.pk).update(last_seen=now)
+	res = svc.process_scan(code, device=device, lang=lang, ip=ip)
 	res.pop('employee_id', None)
 	return JsonResponse(res)
 
 
 def kiosk_check(request):
-	"""Dipakai halaman kiosk untuk memeriksa kunci perangkat saat pertama kali dipasang."""
-	return JsonResponse({'ok': bool(_device_from(request))}, status=200 if _device_from(request) else 401)
+	"""Dipanggil kiosk tiap beberapa detik: server hidup? jaringan boleh? perlu kunci?"""
+	if not svc.ip_allowed(svc.client_ip(request)):
+		return JsonResponse({'ok': False, 'state': 'net'}, status=403)
+	if svc.conf('REQUIRE_DEVICE_KEY') and not _device_from(request):
+		return JsonResponse({'ok': False, 'state': 'key'}, status=401)
+	return JsonResponse({'ok': True, 'state': 'ok', 'require_key': bool(svc.conf('REQUIRE_DEVICE_KEY'))})
 
 
 # ============================================================ papan hari ini
@@ -98,8 +145,9 @@ def kiosk_check(request):
 @login_required
 @allowed_users(allowed_roles=VIEWERS)
 def today(request):
+	lang = _lang(request)
 	d = _local_today()
-	reason = svc.day_off_reason(d)
+	off = svc.day_off_reason(d)
 	active = Employee.objects.filter(status_id=svc.conf('ACTIVE_STATUS_ID'))
 	total = active.count()
 	rows = (Attendance.objects.filter(date=d, scantime__isnull=False)
@@ -117,17 +165,21 @@ def today(request):
 			 for a in rows]
 	for log in logs:
 		log.local = svc.to_local(log.scanned_at).strftime('%H:%M:%S')
+		key = 'res.%s.title' % log.code
+		log.label = i18n.tr(lang, key) if key in i18n.MESSAGES else log.code
+	date_text = i18n.fmt_date(d, lang)
 	return render(request, 'attendance/qr/today.html', _page(
-		request, 'Absensi Hari Ini', date=d, off_reason=reason, stats=stats, items=items, logs=logs))
+		request, 'today.title', date=d, date_text=date_text, stats=stats, items=items, logs=logs, active='today',
+		off_text=i18n.reason_text(off[0], off[1], lang) if off else ''))
 
 
-# ============================================================ perangkat kiosk
+# ============================================================ perangkat kiosk (opsional)
 
 @login_required
 @allowed_users(allowed_roles=DEVICE_ADMINS)
 def devices(request):
 	return render(request, 'attendance/qr/devices.html', _page(
-		request, 'Perangkat Kiosk', devices=ScanDevice.objects.order_by('-id'), new_key=None))
+		request, 'dev.title', devices=ScanDevice.objects.order_by('-id'), new_key=None, active='devices'))
 
 
 @login_required
@@ -136,13 +188,13 @@ def devices(request):
 def device_add(request):
 	name = request.POST.get('name', '').strip()[:100]
 	if not name:
-		messages.warning(request, 'Isi nama perangkat, misalnya "PC Pintu Depan".')
+		messages.warning(request, _tr(request, 'dev.need_name'))
 		return redirect('qr-devices')
 	key = svc.new_device_key()
 	device = ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key),
 									   datetime=timezone.now(), user=request.user)
 	return render(request, 'attendance/qr/devices.html', _page(
-		request, 'Perangkat Kiosk', devices=ScanDevice.objects.order_by('-id'), new_key=key, new_device=device))
+		request, 'dev.title', devices=ScanDevice.objects.order_by('-id'), new_key=key, new_device=device, active='devices'))
 
 
 @login_required
@@ -152,7 +204,7 @@ def device_toggle(request, pk):
 	device = get_object_or_404(ScanDevice, pk=pk)
 	device.is_active = not device.is_active
 	device.save(update_fields=['is_active'])
-	messages.success(request, 'Perangkat "%s" %s.' % (device.name, 'diaktifkan' if device.is_active else 'dinonaktifkan'))
+	messages.success(request, _tr(request, 'dev.msg_on' if device.is_active else 'dev.msg_off', name=device.name))
 	return redirect('qr-devices')
 
 
@@ -176,7 +228,6 @@ def _filtered_employees(request):
 		qs = qs.filter(svc.division_q(div_id))
 	q = request.GET.get('q', '').strip()
 	if q:
-		from django.db.models import Q
 		qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(idfnumber__nrf__icontains=q))
 	return qs.distinct(), div_id, q
 
@@ -192,8 +243,8 @@ def cards(request):
 		info.update(qr=qc, printed=bool(qc and qc.printed_at))
 		people.append(info)
 	return render(request, 'attendance/qr/cards.html', _page(
-		request, 'Kartu QR Pegawai', people=people, divisions=Division.objects.order_by('name'),
-		div_id=div_id, q=q, limited=qs.count() > 500))
+		request, 'cards.title', people=people, divisions=Division.objects.order_by('name'),
+		div_id=div_id, q=q, limited=qs.count() > 500, active='cards'))
 
 
 def _card_context(emp, qc):
@@ -208,10 +259,11 @@ def _card_context(emp, qc):
 @allowed_users(allowed_roles=MANAGERS)
 @require_POST
 def card_print(request):
-	"""Membuat kartu QR yang belum ada, lalu menampilkan halaman cetak (depan + belakang)."""
+	"""Membuat kartu QR yang belum ada, lalu menampilkan halaman cetak (depan + belakang).
+	Bahasa kartu bisa diganti langsung di halaman cetak lewat bendera."""
 	ids = [int(i) for i in request.POST.getlist('ids') if i.isdigit()][:500]
 	if not ids:
-		messages.warning(request, 'Pilih minimal satu pegawai.')
+		messages.warning(request, _tr(request, 'msg.select'))
 		return redirect('qr-cards')
 	emps = (Employee.objects.filter(pk__in=ids, status_id=svc.conf('ACTIVE_STATUS_ID'))
 			.select_related('employeeposition__position', 'employeedivision__division', 'idfnumber', 'employeecard',
@@ -222,13 +274,10 @@ def card_print(request):
 		if not qc.is_active:
 			continue
 		items.append(_card_context(e, qc))
+	cur = _lang(request)
 	return render(request, 'attendance/qr/card_print.html', {
-		'items': items, 'ids': [i['id'] for i in items],
-		'note': _groups('CARD_BACK_NOTE',
-						'Kartu ini milik pegawai Mata Dalan Institute. Scan QR pada alat absensi saat masuk dan pulang. '
-						'Kartu bersifat pribadi dan tidak boleh dipinjamkan. Jika menemukan kartu ini, '
-						'harap kembalikan ke kantor Mata Dalan Institute.'),
-		'contact': _groups('CARD_CONTACT', ''),
+		'items': items, 'ids': [i['id'] for i in items], 'lang': cur, 'title': _tr(request, 'cp.title'),
+		'notes': [{'code': c, 'hidden': c != cur, 'note': i18n.note_for(c), 'contact': i18n.contact_for(c)} for c in i18n.LANGS],
 	})
 
 
@@ -243,19 +292,19 @@ def card_action(request):
 		now = timezone.now()
 		qcs.update(printed_at=now)
 		EmployeeCard.objects.filter(employee_id__in=ids).update(is_printed=True, issue_date=svc.to_local(now).date())
-		messages.success(request, '%d kartu ditandai sudah dicetak.' % len(ids))
+		messages.success(request, _tr(request, 'msg.printed', n=len(ids)))
 	elif action == 'regen':
 		for qc in qcs:
 			qc.version += 1
 			qc.is_active = True
 			qc.printed_at = None
 			qc.save()
-		messages.success(request, 'QR baru dibuat. Kartu lama tidak berlaku lagi, silakan cetak ulang.')
+		messages.success(request, _tr(request, 'msg.regen'))
 	elif action == 'toggle':
 		for qc in qcs:
 			qc.is_active = not qc.is_active
 			qc.save(update_fields=['is_active'])
-		messages.success(request, 'Status kartu diubah.')
+		messages.success(request, _tr(request, 'msg.toggle'))
 	return redirect('qr-cards')
 
 
@@ -274,25 +323,24 @@ def _period(request):
 @login_required
 @allowed_users(allowed_roles=VIEWERS)
 def report(request):
+	lang = _lang(request)
 	year, month = _period(request)
 	div_id = request.GET.get('div', '')
 	div = Division.objects.filter(pk=div_id).first() if div_id.isdigit() else None
 	rep = svc.month_report(year, month, division=div)
 	return render(request, 'attendance/qr/report.html', _page(
-		request, 'Rekap Absensi', rep=rep, year=year, month=month, monthname=f_monthname(month), div=div,
+		request, 'rep.title', rep=rep, year=year, month=month, monthname=i18n.month_name(month, lang), div=div,
 		div_id=div_id, divisions=Division.objects.order_by('name'), years=range(year - 3, year + 2),
-		months=[(i, f_monthname(i)) for i in range(1, 13)], today=_local_today()))
+		months=_months(lang), today=_local_today(), active='report'))
 
 
-_CODE_LABEL = {'P': 'Hadir', 'L': 'Cuti', 'F': 'Alpha', 'W': 'Libur', 'H': 'Libur', '': ''}
-
-
-def _export_rows(rep):
-	head = ['NRF', 'Nama', 'Jabatan', 'Divisi'] + [str(d) for d in rep['days']] + \
-		   ['Hari kerja', 'Hadir', 'Terlambat', 'Cuti', 'Alpha', 'Belum scan pulang', 'Pulang awal']
+def _export_rows(rep, lang):
+	t = lambda k: i18n.tr(lang, k)
+	head = ['NRF', t('th.name'), t('th.position'), t('th.division')] + [str(d) for d in rep['days']] + \
+		   [t('th.workdays'), t('th.present'), t('th.late'), t('th.leave'), t('th.absent'), t('csv.noout'), t('csv.early')]
 	yield head
 	for r in rep['rows']:
-		e, t = r['employee'], r['totals']
+		e, tot = r['employee'], r['totals']
 		cells = []
 		for c in r['cells']:
 			txt = c['code']
@@ -300,12 +348,13 @@ def _export_rows(rep):
 				txt += ' (T)'
 			cells.append(txt)
 		yield [e['nrf'], e['name'], e['position'], e['division']] + cells + \
-			  [t['workdays'], t['present'], t['late'], t['leave'], t['absent'], t['no_out'], t['early']]
+			  [tot['workdays'], tot['present'], tot['late'], tot['leave'], tot['absent'], tot['no_out'], tot['early']]
 
 
 @login_required
 @allowed_users(allowed_roles=VIEWERS)
 def report_export(request):
+	lang = _lang(request)
 	year, month = _period(request)
 	div_id = request.GET.get('div', '')
 	div = Division.objects.filter(pk=div_id).first() if div_id.isdigit() else None
@@ -315,12 +364,12 @@ def report_export(request):
 		try:
 			from openpyxl import Workbook
 		except ImportError:
-			messages.warning(request, 'Excel (.xlsx) belum tersedia. Pasang openpyxl atau pakai CSV.')
+			messages.warning(request, i18n.tr(lang, 'msg.noxlsx'))
 			return redirect('qr-report')
 		wb = Workbook()
 		ws = wb.active
 		ws.title = 'Absensi'
-		for row in _export_rows(rep):
+		for row in _export_rows(rep, lang):
 			ws.append(row)
 		resp = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 		resp['Content-Disposition'] = 'attachment; filename="%s.xlsx"' % name
@@ -329,17 +378,18 @@ def report_export(request):
 	resp = HttpResponse(content_type='text/csv; charset=utf-8')
 	resp['Content-Disposition'] = 'attachment; filename="%s.csv"' % name
 	resp.write('﻿')   # supaya Excel membaca UTF-8 dengan benar
-	csv.writer(resp).writerows(_export_rows(rep))
+	csv.writer(resp).writerows(_export_rows(rep, lang))
 	return resp
 
 
 @login_required
 @allowed_users(allowed_roles=EVERYONE)
 def my_attendance(request):
+	lang = _lang(request)
 	link = EmployeeUser.objects.filter(user=request.user).select_related('employee').first()
 	year, month = _period(request)
 	rep = svc.month_report(year, month, employee=link.employee) if link else None
 	return render(request, 'attendance/qr/me.html', _page(
-		request, 'Absensi Saya', rep=rep, row=rep['rows'][0] if rep and rep['rows'] else None,
-		year=year, month=month, monthname=f_monthname(month), today=_local_today(),
-		years=range(year - 3, year + 2), months=[(i, f_monthname(i)) for i in range(1, 13)]))
+		request, 'me.title', rep=rep, row=rep['rows'][0] if rep and rep['rows'] else None,
+		year=year, month=month, monthname=i18n.month_name(month, lang), today=_local_today(),
+		years=range(year - 3, year + 2), months=_months(lang), active='me'))

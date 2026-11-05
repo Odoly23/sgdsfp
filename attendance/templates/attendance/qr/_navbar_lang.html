@@ -1,0 +1,5 @@
+{% load qr_i18n %}{% comment %}
+	Tempel di setiap menu navbar (adm.html, staff.html, ...) sebelum menu profil:
+	{% include 'attendance/qr/_navbar_lang.html' %}
+	lalu set ATTENDANCE_LANG_IN_NAVBAR = True di settings.py agar bendera tidak tampil dua kali.
+{% endcomment %}<li class="nav-item qr-navbar-lang">{% flags 'link' %}</li>

@@ -1,35 +1,35 @@
 {% extends 'main/layout.html' %}
+{% load qr_i18n %}
 {% block content %}
-{% include 'attendance/qr/_nav.html' with active='devices' %}
+{% include 'attendance/qr/_nav.html' %}
 <div class="qr-page">
-	<div class="qr-head"><div><h1>Perangkat Kiosk</h1>
-		<p class="qr-sub">Hanya PC yang memegang kunci perangkat yang bisa mengirim scan. Scan dari HP atau PC lain ditolak.</p></div></div>
+	<div class="qr-head"><div><h1>{% t 'dev.title' %}</h1><p class="qr-sub">{% t 'dev.sub' %}</p></div></div>
 	{% if new_key %}
 	<div class="qr-card" style="border-color:var(--st-warn)">
-		<h2>Kunci untuk "{{ new_device.name }}" — salin sekarang</h2>
+		<h2>{% t 'dev.new_title' name=new_device.name %}</h2>
 		<div class="qr-key">{{ new_key }}</div>
-		<p class="qr-sub" style="margin-top:10px">Kunci ini hanya tampil sekali dan tidak disimpan di server (hanya sidik SHA-256-nya). Buka halaman kiosk di PC pintu, lalu tempel kunci ini. Kalau hilang, buat perangkat baru.</p>
+		<p class="qr-sub" style="margin-top:10px">{% t 'dev.new_note' %}</p>
 	</div>
 	{% endif %}
 	<div class="qr-card">
-		<h2>Tambah perangkat</h2>
+		<h2>{% t 'dev.add_title' %}</h2>
 		<form method="post" action="{% url 'qr-device-add' %}" class="qr-filter">{% csrf_token %}
-			<div><label>Nama perangkat</label><input type="text" name="name" placeholder="PC Pintu Depan" required></div>
-			<button class="qr-btn" type="submit">Buat kunci</button>
+			<div><label>{% t 'dev.name_label' %}</label><input type="text" name="name" placeholder="{% t 'dev.name_ph' %}" required></div>
+			<button class="qr-btn" type="submit">{% t 'dev.make' %}</button>
 		</form>
 	</div>
 	<div class="qr-card">
-		<h2>Daftar perangkat</h2>
+		<h2>{% t 'dev.list_title' %}</h2>
 		<table class="qr-table">
-			<thead><tr><th>Nama</th><th>Status</th><th>Terakhir aktif</th><th></th></tr></thead>
+			<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.last_seen' %}</th><th></th></tr></thead>
 			<tbody>
 			{% for d in devices %}
 				<tr><td>{{ d.name }}</td>
-					<td>{% if d.is_active %}<span class="qr-chip ok">Aktif</span>{% else %}<span class="qr-chip err">Nonaktif</span>{% endif %}</td>
-					<td>{{ d.last_seen|date:"d/m/Y H:i"|default:"belum pernah" }}</td>
+					<td>{% if d.is_active %}<span class="qr-chip ok">{% t 'st.active' %}</span>{% else %}<span class="qr-chip err">{% t 'st.inactive' %}</span>{% endif %}</td>
+					<td>{% if d.last_seen %}{{ d.last_seen|date:"d/m/Y H:i" }}{% else %}{% t 'dev.never' %}{% endif %}</td>
 					<td><form method="post" action="{% url 'qr-device-toggle' d.pk %}">{% csrf_token %}
-						<button class="qr-btn ghost sm" type="submit">{% if d.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %}</button></form></td></tr>
-			{% empty %}<tr><td colspan="4" class="qr-sub">Belum ada perangkat.</td></tr>
+						<button class="qr-btn ghost sm" type="submit">{% if d.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td></tr>
+			{% empty %}<tr><td colspan="4" class="qr-sub">{% t 'dev.empty' %}</td></tr>
 			{% endfor %}
 			</tbody>
 		</table>

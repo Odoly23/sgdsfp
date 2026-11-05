@@ -1,19 +1,20 @@
 {% extends 'main/layout.html' %}
+{% load qr_i18n %}
 {% block content %}
-{% include 'attendance/qr/_nav.html' with active='report' %}
+{% include 'attendance/qr/_nav.html' %}
 <div class="qr-page">
-	<div class="qr-head"><div><h1>Rekap Absensi</h1>
-		<p class="qr-sub">{{ monthname }} {{ year }}{% if div %} · {{ div.name }}{% else %} · semua divisi{% endif %}</p></div>
+	<div class="qr-head"><div><h1>{% t 'rep.title' %}</h1>
+		<p class="qr-sub">{{ monthname }} {{ year }} · {% if div %}{{ div.name }}{% else %}{% t 'rep.all' %}{% endif %}</p></div>
 		<div>
-			<a class="qr-btn ghost" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">Unduh CSV</a>
-			<a class="qr-btn" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">Unduh Excel</a>
+			<a class="qr-btn ghost" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">{% t 'btn.csv' %}</a>
+			<a class="qr-btn" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">{% t 'btn.xlsx' %}</a>
 		</div></div>
 	<form method="get" class="qr-filter qr-card">
-		<div><label>Divisi</label><select name="div"><option value="">Semua divisi</option>
+		<div><label>{% t 'f.division' %}</label><select name="div"><option value="">{% t 'f.all_div' %}</option>
 			{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
-		<div><label>Bulan</label><select name="month">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
-		<div><label>Tahun</label><select name="year">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
-		<button class="qr-btn" type="submit">Tampilkan</button>
+		<div><label>{% t 'f.month' %}</label><select name="month">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+		<div><label>{% t 'f.year' %}</label><select name="year">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+		<button class="qr-btn" type="submit">{% t 'f.show' %}</button>
 	</form>
 	<div class="qr-card">{% include 'attendance/qr/_grid.html' with rows=rep.rows %}</div>
 </div>

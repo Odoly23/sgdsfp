@@ -1,0 +1,381 @@
+"""Terjemahan absensi QR: Tetun (tet), Inggris (en), Indonesia (id), Portugis (pt).
+
+Sengaja tidak memakai gettext/LocaleMiddleware supaya proyek lain tidak terpengaruh.
+Bahasa dipilih lewat cookie `mdi_lang` (bendera di setiap halaman). Tambah kunci baru di MESSAGES.
+Teks Tetun sebaiknya dibaca ulang oleh penutur asli sebelum dipakai resmi.
+"""
+import datetime
+
+from django.conf import settings
+
+LANGS = ('tet', 'en', 'id', 'pt')
+LANG_NAMES = {'tet': 'Tetun', 'en': 'English', 'id': 'Indonesia', 'pt': 'Português'}
+COOKIE = 'mdi_lang'
+COOKIE_AGE = 60 * 60 * 24 * 365
+
+
+def default_lang():
+	lang = getattr(settings, 'ATTENDANCE_DEFAULT_LANG', 'tet')
+	return lang if lang in LANGS else 'tet'
+
+
+def norm(lang):
+	return lang if lang in LANGS else default_lang()
+
+
+def get_lang(request):
+	return norm(request.COOKIES.get(COOKIE) if request is not None else None)
+
+
+MONTHS = {
+	'tet': ['Janeiru', 'Fevereiru', 'Marsu', 'Abril', 'Maiu', 'Junhu', 'Julhu', 'Agostu', 'Setembru', 'Outubru', 'Novembru', 'Dezembru'],
+	'en': ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+	'id': ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'],
+	'pt': ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
+}
+# indeks 0 = Senin
+WEEKDAYS = {
+	'tet': ['Segunda', 'Tersa', 'Kuarta', 'Kinta', 'Sexta', 'Sábadu', 'Domingu'],
+	'en': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+	'id': ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'],
+	'pt': ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'],
+}
+
+
+def month_name(month, lang):
+	return MONTHS[norm(lang)][month - 1]
+
+
+def fmt_date(d, lang):
+	lang = norm(lang)
+	return '%s, %d %s %d' % (WEEKDAYS[lang][d.weekday()], d.day, MONTHS[lang][d.month - 1], d.year)
+
+
+# urutan nilai: (tet, en, id, pt). Placeholder {nama} harus sama di keempat bahasa (dicek oleh tes).
+MESSAGES = {
+	# ---------------------------------------------------------------- navigasi
+	'nav.today': ('Ohin', 'Today', 'Hari ini', 'Hoje'),
+	'nav.report': ('Rezumu fulan', 'Monthly report', 'Rekap bulanan', 'Relatório mensal'),
+	'nav.cards': ('Kartaun QR', 'QR cards', 'Kartu QR', 'Cartões QR'),
+	'nav.devices': ('Aparelu kiosk', 'Kiosk devices', 'Perangkat kiosk', 'Dispositivos do quiosque'),
+	'nav.me': ('Ha\'u nia absensia', 'My attendance', 'Absensi saya', 'A minha assiduidade'),
+	'nav.kiosk': ('Loke ekran kiosk', 'Open kiosk screen', 'Buka layar kiosk', 'Abrir ecrã do quiosque'),
+	'lang.label': ('Lian', 'Language', 'Bahasa', 'Idioma'),
+
+	# ---------------------------------------------------------------- hasil scan (server)
+	'res.invalid.title': ('QR la rekoñese', 'Unknown QR code', 'QR tidak dikenal', 'QR desconhecido'),
+	'res.invalid.msg': ('Kartaun ida-ne\'e laos kartaun absensia ne\'ebé válidu.',
+		'This is not a valid attendance card.', 'Kartu ini bukan kartu absensi yang sah.', 'Este não é um cartão de assiduidade válido.'),
+	'res.revoked.title': ('Kartaun la válidu', 'Card not valid', 'Kartu tidak berlaku', 'Cartão inválido'),
+	'res.revoked.msg': ('Kartaun ne\'e troka ona ka la ativu. Kontaktu administradór.',
+		'This card has been replaced or deactivated. Contact the admin.',
+		'Kartu ini sudah diganti atau dinonaktifkan. Hubungi admin.',
+		'Este cartão foi substituído ou desativado. Contacte o administrador.'),
+	'res.inactive.title': ('Funsionáriu la ativu', 'Employee not active', 'Pegawai tidak aktif', 'Funcionário inativo'),
+	'res.inactive.msg': ('Kontaktu administradór.', 'Contact the admin.', 'Hubungi admin.', 'Contacte o administrador.'),
+	'res.card_expired.title': ('Kartaun validade remata ona', 'Card expired', 'Kartu kedaluwarsa', 'Cartão expirado'),
+	'res.card_expired.msg': ('Validade kartaun funsionáriu remata ona. Kontaktu administradór.',
+		'The employee card has expired. Contact the admin.',
+		'Masa berlaku kartu pegawai sudah habis. Hubungi admin.',
+		'O cartão de funcionário expirou. Contacte o administrador.'),
+	'res.holiday.title': ('Loron feriadu', 'Day off', 'Hari libur', 'Dia de folga'),
+	'res.holiday.msg': ('{reason}. Absensia la rejistu ohin.', '{reason}. Attendance is not recorded today.',
+		'{reason}. Absensi tidak dicatat hari ini.', '{reason}. A assiduidade não é registada hoje.'),
+	'res.leave.title': ('Iha lisensa', 'On leave', 'Sedang cuti', 'Em licença'),
+	'res.leave.msg': ('Ita-nia status ohin: {kind} (to\'o {end}). Absensia la muda.',
+		'Your status today: {kind} (until {end}). Attendance is not changed.',
+		'Status Anda hari ini: {kind} (sampai {end}). Absensi tidak diubah.',
+		'O seu estado hoje: {kind} (até {end}). A assiduidade não é alterada.'),
+	'res.month_final.title': ('Fulan final ona', 'Month is final', 'Bulan sudah final', 'Mês finalizado'),
+	'res.month_final.msg': ('Absensia fulan ne\'e finaliza ona. Kontaktu administradór.',
+		'This month\'s attendance has been finalized. Contact the admin.',
+		'Absensi bulan ini sudah difinalkan. Hubungi admin.',
+		'A assiduidade deste mês foi finalizada. Contacte o administrador.'),
+	'res.config.title': ('Konfigurasaun la kompletu', 'Setup incomplete', 'Pengaturan belum lengkap', 'Configuração incompleta'),
+	'res.config.msg': ('Status presensa (kódigu {code}) seidauk iha iha AttendanceStatus.',
+		'The "present" status (code {code}) does not exist in AttendanceStatus.',
+		'Status hadir (kode {code}) belum ada di AttendanceStatus.',
+		'O estado "presente" (código {code}) não existe em AttendanceStatus.'),
+	'res.manual.title': ('Admin hatama ona', 'Already filled by admin', 'Sudah diisi admin', 'Já preenchido pelo administrador'),
+	'res.manual.msg': ('Absensia ohin admin hatama ona manuál, scan la simu.',
+		'Today\'s attendance was filled in manually by the admin; the scan is not accepted.',
+		'Absensi hari ini sudah diisi manual oleh admin, scan tidak diterima.',
+		'A assiduidade de hoje foi preenchida manualmente pelo administrador; a leitura não é aceite.'),
+	'res.busy.title': ('Koko fali', 'Try again', 'Coba lagi', 'Tente novamente'),
+	'res.busy.msg': ('Sistema okupadu, scan fali ita-nia kartaun.', 'The system is busy, scan your card again.',
+		'Sistem sibuk, scan ulang kartu Anda.', 'O sistema está ocupado, leia o cartão novamente.'),
+	'res.in_late.title': ('Tama rejistu (tardi)', 'Check-in recorded (late)', 'Masuk tercatat (terlambat)', 'Entrada registada (atraso)'),
+	'res.in_late.msg': ('Tama iha oras {time}. Limite tama {limit}.', 'Checked in at {time}. Check-in limit is {limit}.',
+		'Masuk pukul {time}. Batas masuk {limit}.', 'Entrada às {time}. Limite de entrada {limit}.'),
+	'res.in.title': ('Bem-vindu', 'Welcome', 'Selamat datang', 'Bem-vindo'),
+	'res.in.msg': ('Tama iha oras {time}.', 'Checked in at {time}.', 'Masuk pukul {time}.', 'Entrada às {time}.'),
+	'res.duplicate.title': ('Scan ona', 'Already scanned', 'Sudah discan', 'Já lido'),
+	'res.duplicate.msg': ('Ita-nia kartaun foin scan ona.', 'Your card was just scanned.',
+		'Kartu Anda baru saja discan.', 'O seu cartão acabou de ser lido.'),
+	'res.already_in.title': ('Rejistu tama ona', 'Already checked in', 'Sudah tercatat masuk', 'Entrada já registada'),
+	'res.already_in.msg': ('Tama iha oras {time}. Scan fali bainhira sai.', 'Checked in at {time}. Scan again when you leave.',
+		'Masuk pukul {time}. Scan lagi saat pulang.', 'Entrada às {time}. Leia novamente ao sair.'),
+	'res.out_early.title': ('Sai sedu rejistu', 'Early check-out recorded', 'Pulang awal tercatat', 'Saída antecipada registada'),
+	'res.out_early.msg': ('Sai iha oras {time}. Oras sai eskritóriu {limit}.', 'Checked out at {time}. Office closing time is {limit}.',
+		'Pulang pukul {time}. Jam pulang kantor {limit}.', 'Saída às {time}. Hora de saída do escritório {limit}.'),
+	'res.out.title': ('To\'o fali tan', 'See you', 'Sampai jumpa', 'Até breve'),
+	'res.out.msg': ('Sai iha oras {time}.', 'Checked out at {time}.', 'Pulang pukul {time}.', 'Saída às {time}.'),
+	'res.device.title': ('Aparelu seidauk rejistu', 'Device not registered', 'Perangkat belum terdaftar', 'Dispositivo não registado'),
+	'res.device.msg': ('Xave aparelu sala ka la ativu. Kontaktu administradór.',
+		'The device key is wrong or disabled. Contact the admin.',
+		'Kunci perangkat salah atau dinonaktifkan. Hubungi admin.',
+		'A chave do dispositivo está errada ou desativada. Contacte o administrador.'),
+	'res.net.title': ('Sai husi rede eskritóriu', 'Outside the office network', 'Di luar jaringan kantor', 'Fora da rede do escritório'),
+	'res.net.msg': ('Scan simu de\'it husi rede eskritóriu.', 'Scans are only accepted from the office network.',
+		'Scan hanya diterima dari jaringan kantor.', 'As leituras só são aceites a partir da rede do escritório.'),
+	'reason.weekend': ('Final semana', 'Weekend', 'Akhir pekan', 'Fim de semana'),
+	'reason.holiday': ('Feriadu nasionál', 'National holiday', 'Libur nasional', 'Feriado nacional'),
+	'reason.tolerance': ('Loron toleránsia', 'Tolerance day', 'Hari toleransi', 'Dia de tolerância'),
+	'leave.default': ('Lisensa', 'Leave', 'Cuti', 'Licença'),
+
+	# ---------------------------------------------------------------- kiosk
+	'k.title': ('ABSENSIA FUNSIONÁRIU', 'EMPLOYEE ATTENDANCE', 'ABSENSI PEGAWAI', 'ASSIDUIDADE DOS FUNCIONÁRIOS'),
+	'k.hours': ('Tama to\'o {late} · Sai hahú {end}', 'In until {late} · Out from {end}',
+		'Masuk sampai {late} · Pulang mulai {end}', 'Entrada até {late} · Saída a partir das {end}'),
+	'k.hint': ('Hatudu QR kartaun membru ba scanner', 'Show your member card QR to the scanner',
+		'Tempelkan QR kartu member ke scanner', 'Aproxime o QR do cartão de membro do leitor'),
+	'k.rule': ('Scan dahuluk = tama · Scan ikus = sai', 'First scan = in · Last scan = out',
+		'Scan pertama = masuk · Scan terakhir = pulang', 'Primeira leitura = entrada · Última leitura = saída'),
+	'k.foot': ('Se ekran la responde, klik iha fatin ruma hodi scan fali.', 'If the screen does not respond, click anywhere and scan again.',
+		'Jika layar tidak merespons, klik di mana saja lalu scan ulang.', 'Se o ecrã não responder, clique em qualquer lado e leia novamente.'),
+	'k.cam_on': ('Uza kámera', 'Use camera', 'Pakai kamera', 'Usar câmara'),
+	'k.cam_off': ('Taka kámera', 'Turn camera off', 'Matikan kamera', 'Desligar câmara'),
+	'k.idle': ('Prontu atu scan kartaun', 'Ready to scan a card', 'Siap memindai kartu', 'Pronto para ler o cartão'),
+	'k.srv_ok': ('Servidór konekta', 'Server connected', 'Server terhubung', 'Servidor ligado'),
+	'k.srv_down': ('Servidór la konekta', 'Server disconnected', 'Server terputus', 'Servidor desligado'),
+	'k.srv_net': ('Sai husi rede eskritóriu', 'Outside the office network', 'Di luar jaringan kantor', 'Fora da rede do escritório'),
+	'k.scanner_wait': ('Scanner: scan kartaun ida atu teste', 'Scanner: scan a card to test', 'Scanner: scan kartu untuk tes', 'Leitor: leia um cartão para testar'),
+	'k.scanner_ok': ('Scanner detekta', 'Scanner detected', 'Scanner terdeteksi', 'Leitor detetado'),
+	'k.key_btn': ('Xave aparelu', 'Device key', 'Kunci perangkat', 'Chave do dispositivo'),
+	'k.setup_title': ('Hatama aparelu kiosk', 'Set up this kiosk device', 'Pasang perangkat kiosk', 'Configurar o dispositivo do quiosque'),
+	'k.setup_desc': ('Hatama xave aparelu husi admin (menu Aparelu kiosk). Dala ida de\'it iha PC ne\'e.',
+		'Enter the device key from the admin (Kiosk devices menu). Only once on this PC.',
+		'Masukkan kunci perangkat dari admin (menu Perangkat kiosk). Cukup sekali di PC ini.',
+		'Introduza a chave do dispositivo fornecida pelo administrador (menu Dispositivos do quiosque). Apenas uma vez neste PC.'),
+	'k.setup_ph': ('Xave aparelu', 'Device key', 'Kunci perangkat', 'Chave do dispositivo'),
+	'k.setup_save': ('Salva', 'Save', 'Simpan', 'Guardar'),
+	'k.setup_bad': ('Xave sala ka aparelu la ativu.', 'Wrong key or device disabled.',
+		'Kunci salah atau perangkat dinonaktifkan.', 'Chave errada ou dispositivo desativado.'),
+	'k.setup_unreach': ('Servidór la konsege konekta.', 'Cannot reach the server.', 'Server tidak bisa dihubungi.', 'Não foi possível contactar o servidor.'),
+	'k.offline_title': ('La iha konexaun', 'No connection', 'Tidak ada koneksi', 'Sem ligação'),
+	'k.offline_msg': ('Servidór absensia la konsege konekta. Koko fali.', 'The attendance server cannot be reached. Try again.',
+		'Server absensi tidak bisa dihubungi. Coba lagi.', 'Não foi possível contactar o servidor de assiduidade. Tente novamente.'),
+	'k.cam_err_title': ('Kámera la loke', 'Camera cannot be opened', 'Kamera tidak bisa dibuka', 'Não foi possível abrir a câmara'),
+	'k.cam_err_msg': ('Fó lisensa ba kámera, no loke pájina liu husi HTTPS.', 'Allow camera access and open the page over HTTPS.',
+		'Izinkan akses kamera, dan buka halaman lewat HTTPS.', 'Permita o acesso à câmara e abra a página por HTTPS.'),
+
+	# ---------------------------------------------------------------- umum
+	'th.name': ('Naran', 'Name', 'Nama', 'Nome'),
+	'th.division': ('Diresaun', 'Division', 'Divisi', 'Direção'),
+	'th.position': ('Pojisaun', 'Position', 'Jabatan', 'Cargo'),
+	'th.in': ('Tama', 'In', 'Masuk', 'Entrada'),
+	'th.out': ('Sai', 'Out', 'Pulang', 'Saída'),
+	'th.note': ('Observasaun', 'Note', 'Keterangan', 'Observação'),
+	'th.time': ('Oras', 'Time', 'Jam', 'Hora'),
+	'th.person': ('Funsionáriu', 'Employee', 'Pegawai', 'Funcionário'),
+	'th.result': ('Rezultadu', 'Result', 'Hasil', 'Resultado'),
+	'th.message': ('Mensajen', 'Message', 'Pesan', 'Mensagem'),
+	'th.device': ('Aparelu', 'Device', 'Perangkat', 'Dispositivo'),
+	'th.status': ('Status', 'Status', 'Status', 'Estado'),
+	'th.last_seen': ('Ativu ikus', 'Last active', 'Terakhir aktif', 'Última atividade'),
+	'th.nrf': ('NRF', 'NRF', 'NRF', 'NRF'),
+	'th.qr': ('Kartaun QR', 'QR card', 'Kartu QR', 'Cartão QR'),
+	'th.emp': ('Funsionáriu', 'Employee', 'Pegawai', 'Funcionário'),
+	'th.workdays': ('Loron servisu', 'Work days', 'Hari kerja', 'Dias úteis'),
+	'th.present': ('Presensa', 'Present', 'Hadir', 'Presente'),
+	'th.late': ('Tardi', 'Late', 'Terlambat', 'Atrasos'),
+	'th.leave': ('Lisensa', 'Leave', 'Cuti', 'Licença'),
+	'th.absent': ('Falta', 'Absent', 'Alpha', 'Faltas'),
+	'st.active': ('Ativu', 'Active', 'Aktif', 'Ativo'),
+	'st.inactive': ('La ativu', 'Inactive', 'Nonaktif', 'Inativo'),
+	'none': ('La iha.', 'None.', 'Tidak ada.', 'Nenhum.'),
+	'f.division': ('Diresaun', 'Division', 'Divisi', 'Direção'),
+	'f.all_div': ('Diresaun hotu', 'All divisions', 'Semua divisi', 'Todas as direções'),
+	'f.month': ('Fulan', 'Month', 'Bulan', 'Mês'),
+	'f.year': ('Tinan', 'Year', 'Tahun', 'Ano'),
+	'f.search': ('Buka naran ka NRF', 'Search name or NRF', 'Cari nama atau NRF', 'Pesquisar nome ou NRF'),
+	'f.show': ('Hatudu', 'Show', 'Tampilkan', 'Mostrar'),
+	'sec.warn': ('Atensaun seguransa: scan bele simu husi rede ruma. Hatama ATTENDANCE_KIOSK_ALLOWED_IPS ho rede eskritóriu iha settings.py.',
+		'Security notice: scans are accepted from any network. Set ATTENDANCE_KIOSK_ALLOWED_IPS to your office network in settings.py.',
+		'Peringatan keamanan: scan diterima dari jaringan mana pun. Isi ATTENDANCE_KIOSK_ALLOWED_IPS dengan jaringan kantor di settings.py.',
+		'Aviso de segurança: as leituras são aceites de qualquer rede. Defina ATTENDANCE_KIOSK_ALLOWED_IPS com a rede do escritório em settings.py.'),
+
+	# ---------------------------------------------------------------- hari ini
+	'today.title': ('Absensia ohin', 'Attendance today', 'Absensi hari ini', 'Assiduidade de hoje'),
+	'today.sub': ('{date} · pájina ne\'e atualiza an kada segundu 30', '{date} · this page refreshes every 30 seconds',
+		'{date} · halaman ini menyegarkan diri tiap 30 detik', '{date} · esta página atualiza-se a cada 30 segundos'),
+	'today.off': ('Ohin laos loron servisu: {reason}. Scan sei rejeita.', 'Today is not a workday: {reason}. Scans will be rejected.',
+		'Hari ini bukan hari kerja: {reason}. Scan akan ditolak.', 'Hoje não é dia útil: {reason}. As leituras serão rejeitadas.'),
+	'tile.scanned': ('Scan ona', 'Scanned', 'Sudah scan', 'Já leram'),
+	'tile.late': ('Tardi', 'Late', 'Terlambat', 'Atrasos'),
+	'tile.leave': ('Lisensa', 'On leave', 'Cuti', 'Em licença'),
+	'tile.waiting': ('Seidauk scan', 'Not scanned yet', 'Belum scan', 'Ainda sem leitura'),
+	'tile.total': ('Funsionáriu ativu', 'Active employees', 'Pegawai aktif', 'Funcionários ativos'),
+	'tile.present': ('Presensa', 'Present', 'Hadir', 'Presente'),
+	'tile.absent': ('Falta', 'Absent', 'Alpha', 'Faltas'),
+	'today.t1': ('Scan ona ohin', 'Scanned today', 'Sudah scan hari ini', 'Leituras de hoje'),
+	'today.t2': ('Scan ne\'ebé rejeita ka la tau-matan (foin dadauk)', 'Rejected or ignored scans (latest)',
+		'Scan yang ditolak atau diabaikan (terbaru)', 'Leituras rejeitadas ou ignoradas (mais recentes)'),
+	'today.empty': ('Seidauk iha scan.', 'No scans yet.', 'Belum ada scan.', 'Ainda sem leituras.'),
+	'today.unknown': ('(QR la rekoñese)', '(unknown QR)', '(QR tidak dikenal)', '(QR desconhecido)'),
+	'chip.ontime': ('Tuir oras', 'On time', 'Tepat waktu', 'Pontual'),
+	'chip.late': ('Tardi', 'Late', 'Terlambat', 'Atrasado'),
+	'chip.early': ('Sai sedu', 'Left early', 'Pulang awal', 'Saída antecipada'),
+
+	# ---------------------------------------------------------------- perangkat
+	'dev.title': ('Aparelu kiosk', 'Kiosk devices', 'Perangkat kiosk', 'Dispositivos do quiosque'),
+	'dev.sub': ('Opsionál. Xave aparelu uza de\'it bainhira ATTENDANCE_REQUIRE_DEVICE_KEY = True; se la\'e, scanner USB mak funsiona direta.',
+		'Optional. Device keys are only required when ATTENDANCE_REQUIRE_DEVICE_KEY = True; otherwise a USB scanner works straight away.',
+		'Opsional. Kunci perangkat hanya wajib bila ATTENDANCE_REQUIRE_DEVICE_KEY = True; jika tidak, scanner USB langsung bekerja.',
+		'Opcional. As chaves só são obrigatórias com ATTENDANCE_REQUIRE_DEVICE_KEY = True; caso contrário, o leitor USB funciona de imediato.'),
+	'dev.new_title': ('Xave ba "{name}" — kopia agora', 'Key for "{name}" — copy it now', 'Kunci untuk "{name}" — salin sekarang', 'Chave para "{name}" — copie agora'),
+	'dev.new_note': ('Xave ne\'e hatudu dala ida de\'it no la rai iha servidór (de\'it SHA-256). Se lakon, kria aparelu foun.',
+		'This key is shown only once and is not stored on the server (only its SHA-256 hash). If lost, create a new device.',
+		'Kunci ini hanya tampil sekali dan tidak disimpan di server (hanya sidik SHA-256-nya). Kalau hilang, buat perangkat baru.',
+		'Esta chave só é mostrada uma vez e não fica guardada no servidor (apenas o hash SHA-256). Se a perder, crie um novo dispositivo.'),
+	'dev.add_title': ('Aumenta aparelu', 'Add a device', 'Tambah perangkat', 'Adicionar dispositivo'),
+	'dev.name_label': ('Naran aparelu', 'Device name', 'Nama perangkat', 'Nome do dispositivo'),
+	'dev.name_ph': ('PC Odamatan', 'Front door PC', 'PC Pintu Depan', 'PC da entrada'),
+	'dev.make': ('Kria xave', 'Create key', 'Buat kunci', 'Criar chave'),
+	'dev.list_title': ('Lista aparelu', 'Device list', 'Daftar perangkat', 'Lista de dispositivos'),
+	'dev.never': ('seidauk ativu', 'never', 'belum pernah', 'nunca'),
+	'dev.disable': ('Lakon ativu', 'Disable', 'Nonaktifkan', 'Desativar'),
+	'dev.enable': ('Ativa', 'Enable', 'Aktifkan', 'Ativar'),
+	'dev.empty': ('Seidauk iha aparelu.', 'No devices yet.', 'Belum ada perangkat.', 'Ainda sem dispositivos.'),
+	'dev.need_name': ('Hatama naran aparelu, ezemplu "PC Odamatan".', 'Enter a device name, for example "Front door PC".',
+		'Isi nama perangkat, misalnya "PC Pintu Depan".', 'Introduza um nome, por exemplo "PC da entrada".'),
+	'dev.msg_on': ('Aparelu "{name}" ativa ona.', 'Device "{name}" enabled.', 'Perangkat "{name}" diaktifkan.', 'Dispositivo "{name}" ativado.'),
+	'dev.msg_off': ('Aparelu "{name}" la ativu ona.', 'Device "{name}" disabled.', 'Perangkat "{name}" dinonaktifkan.', 'Dispositivo "{name}" desativado.'),
+
+	# ---------------------------------------------------------------- kartu (admin)
+	'cards.title': ('Kartaun QR funsionáriu', 'Employee QR cards', 'Kartu QR pegawai', 'Cartões QR dos funcionários'),
+	'cards.sub': ('Hili funsionáriu, klik "Imprime kartaun hili", imprime oin no kotuk, depois marka katak imprime ona.',
+		'Select employees, click "Print selected cards", print front and back, then mark them as printed.',
+		'Pilih pegawai, klik "Cetak kartu terpilih", cetak depan dan belakang, lalu tandai sudah dicetak.',
+		'Selecione os funcionários, clique em "Imprimir cartões selecionados", imprima frente e verso e marque como impressos.'),
+	'cards.limit': ('Funsionáriu 500 primeiru de\'it mak hatudu. Hamenus ho filtru diresaun.', 'Only the first 500 employees are shown. Narrow down with the division filter.',
+		'Hanya 500 pegawai pertama yang ditampilkan. Persempit dengan filter divisi.', 'Apenas os primeiros 500 funcionários são mostrados. Restrinja com o filtro de direção.'),
+	'btn.print': ('Imprime kartaun hili', 'Print selected cards', 'Cetak kartu terpilih', 'Imprimir cartões selecionados'),
+	'btn.printed': ('Marka imprime ona', 'Mark as printed', 'Tandai sudah dicetak', 'Marcar como impresso'),
+	'btn.regen': ('Troka QR (kartaun lakon)', 'Replace QR (lost card)', 'Ganti QR (kartu hilang)', 'Substituir QR (cartão perdido)'),
+	'btn.toggle': ('Ativu/la ativu', 'Enable/disable', 'Aktif/nonaktifkan', 'Ativar/desativar'),
+	'btn.csv': ('Download CSV', 'Download CSV', 'Unduh CSV', 'Transferir CSV'),
+	'btn.xlsx': ('Download Excel', 'Download Excel', 'Unduh Excel', 'Transferir Excel'),
+	'regen.confirm': ('Kria QR foun ba funsionáriu hili? Kartaun tuan la válidu hanesan.', 'Create a new QR for the selected employees? Old cards stop working immediately.',
+		'Buat QR baru untuk pegawai terpilih? Kartu lama langsung tidak berlaku.', 'Criar um novo QR para os funcionários selecionados? Os cartões antigos deixam de funcionar de imediato.'),
+	'qr.none': ('Seidauk kria', 'Not created', 'Belum dibuat', 'Não criado'),
+	'qr.off': ('La ativu', 'Inactive', 'Nonaktif', 'Inativo'),
+	'qr.printed': ('Imprime ona', 'Printed', 'Sudah dicetak', 'Impresso'),
+	'qr.notprinted': ('Seidauk imprime', 'Not printed', 'Belum dicetak', 'Por imprimir'),
+	'cards.empty': ('La iha funsionáriu.', 'No employees.', 'Tidak ada pegawai.', 'Sem funcionários.'),
+	'msg.select': ('Hili funsionáriu ida at leu.', 'Select at least one employee.', 'Pilih minimal satu pegawai.', 'Selecione pelo menos um funcionário.'),
+	'msg.printed': ('Kartaun {n} marka imprime ona.', '{n} cards marked as printed.', '{n} kartu ditandai sudah dicetak.', '{n} cartões marcados como impressos.'),
+	'msg.regen': ('QR foun kria ona. Kartaun tuan la válidu tan, favór imprime fali.', 'New QR created. The old card is no longer valid; please print again.',
+		'QR baru dibuat. Kartu lama tidak berlaku lagi, silakan cetak ulang.', 'Novo QR criado. O cartão antigo deixou de ser válido; imprima novamente.'),
+	'msg.toggle': ('Status kartaun troka ona.', 'Card status changed.', 'Status kartu diubah.', 'Estado do cartão alterado.'),
+	'msg.noxlsx': ('Excel (.xlsx) seidauk disponivel. Instala openpyxl ka uza CSV.', 'Excel (.xlsx) is not available. Install openpyxl or use CSV.',
+		'Excel (.xlsx) belum tersedia. Pasang openpyxl atau pakai CSV.', 'Excel (.xlsx) indisponível. Instale o openpyxl ou use CSV.'),
+
+	# ---------------------------------------------------------------- halaman cetak kartu
+	'cp.title': ('Imprime kartaun MDI', 'Print MDI cards', 'Cetak kartu MDI', 'Imprimir cartões MDI'),
+	'cp.count': ('Kartaun {n}', '{n} cards', '{n} kartu', '{n} cartões'),
+	'cp.both': ('Oin + kotuk', 'Front + back', 'Depan + belakang', 'Frente + verso'),
+	'cp.front': ('Oin de\'it', 'Front only', 'Depan saja', 'Só frente'),
+	'cp.back': ('Kotuk de\'it', 'Back only', 'Belakang saja', 'Só verso'),
+	'cp.print': ('Imprime', 'Print', 'Cetak', 'Imprimir'),
+	'cp.help': ('Hili folha 85,6 × 54 mm, la iha margem, eskala 100%. Ba printer sorin rua, hili "Oin + kotuk".',
+		'Set paper to 85.6 × 54 mm, no margins, 100% scale. For duplex printers choose "Front + back".',
+		'Atur kertas: ukuran 85,6 × 54 mm, tanpa margin, skala 100%. Untuk printer dua sisi, pilih "Depan + belakang".',
+		'Defina o papel 85,6 × 54 mm, sem margens, escala 100%. Para impressoras frente e verso, escolha "Frente + verso".'),
+	'cp.empty': ('La iha kartaun ativu atu imprime.', 'No active cards to print.', 'Tidak ada kartu aktif untuk dicetak.', 'Não há cartões ativos para imprimir.'),
+	'cp.done_q': ('Imprime remata ona?', 'Finished printing?', 'Sudah selesai mencetak?', 'Terminou a impressão?'),
+	'cp.mark': ('Marka imprime ona', 'Mark as printed', 'Tandai sudah dicetak', 'Marcar como impresso'),
+	'cp.card_lang': ('Lian kartaun', 'Card language', 'Bahasa kartu', 'Idioma do cartão'),
+	'card.kind': ('KARTAUN FUNSIONÁRIU', 'EMPLOYEE CARD', 'KARTU PEGAWAI', 'CARTÃO DE FUNCIONÁRIO'),
+	'card.no': ('Nú.', 'No.', 'No.', 'N.º'),
+	'card.valid': ('Válidu to\'o', 'Valid until', 'Berlaku s/d', 'Válido até'),
+	'card.att': ('Kartaun absensia', 'Attendance card', 'Kartu absensi', 'Cartão de assiduidade'),
+	'card.note': (
+		'Kartaun ida-ne\'e ba funsionáriu Mata Dalan Institute. Scan QR iha mákina absensia bainhira tama no sai. '
+		'Kartaun ne\'e pesoál, la bele empresta. Se hetan kartaun ida-ne\'e, favór fó fila ba eskritóriu Mata Dalan Institute.',
+		'This card belongs to an employee of Mata Dalan Institute. Scan the QR at the attendance reader when you arrive and leave. '
+		'The card is personal and must not be lent. If you find this card, please return it to the Mata Dalan Institute office.',
+		'Kartu ini milik pegawai Mata Dalan Institute. Scan QR pada alat absensi saat masuk dan pulang. '
+		'Kartu bersifat pribadi dan tidak boleh dipinjamkan. Jika menemukan kartu ini, harap kembalikan ke kantor Mata Dalan Institute.',
+		'Este cartão pertence a um funcionário do Mata Dalan Institute. Leia o QR no leitor de assiduidade ao entrar e ao sair. '
+		'O cartão é pessoal e não deve ser emprestado. Se encontrar este cartão, devolva-o ao escritório do Mata Dalan Institute.'),
+	'card.scan': ('Scan bainhira tama no sai', 'Scan when entering & leaving', 'Scan saat masuk & pulang', 'Leia ao entrar e ao sair'),
+
+	# ---------------------------------------------------------------- rekap
+	'rep.title': ('Rezumu absensia', 'Attendance report', 'Rekap absensi', 'Relatório de assiduidade'),
+	'rep.all': ('diresaun hotu', 'all divisions', 'semua divisi', 'todas as direções'),
+	'legend.present': ('Presensa', 'Present', 'Hadir', 'Presente'),
+	'legend.late': ('Presensa, tardi', 'Present, late', 'Hadir, terlambat', 'Presente, com atraso'),
+	'legend.leave': ('Lisensa', 'Leave', 'Cuti', 'Licença'),
+	'legend.absent': ('Falta', 'Absent', 'Alpha', 'Falta'),
+	'legend.off': ('Feriadu / final semana', 'Holiday / weekend', 'Libur / akhir pekan', 'Feriado / fim de semana'),
+	'legend.flags': ('↓ seidauk scan sai · ↑ sai sedu', '↓ no check-out yet · ↑ left early',
+		'↓ belum scan pulang · ↑ pulang awal', '↓ sem saída registada · ↑ saída antecipada'),
+	'grid.empty': ('La iha dadus.', 'No data.', 'Tidak ada data.', 'Sem dados.'),
+	'grid.in': ('Tama', 'In', 'Masuk', 'Entrada'),
+	'grid.out': ('Sai', 'Out', 'Pulang', 'Saída'),
+	'csv.noout': ('Seidauk scan sai', 'No check-out', 'Belum scan pulang', 'Sem saída'),
+	'csv.early': ('Sai sedu', 'Left early', 'Pulang awal', 'Saída antecipada'),
+	'me.title': ('Ha\'u nia absensia', 'My attendance', 'Absensi saya', 'A minha assiduidade'),
+	'me.unlinked': ('Ita-nia konta seidauk liga ba dadus funsionáriu. Kontaktu administradór.', 'Your account is not linked to an employee record. Contact the admin.',
+		'Akun Anda belum dihubungkan ke data pegawai. Hubungi admin.', 'A sua conta ainda não está associada a um funcionário. Contacte o administrador.'),
+}
+
+# daftar kunci yang dikirim ke JavaScript kiosk
+KIOSK_PREFIXES = ('k.', 'res.net', 'res.device')
+
+
+def tr(lang, key, **params):
+	row = MESSAGES.get(key)
+	if row is None:
+		return key
+	text = row[LANGS.index(norm(lang))] or row[1]
+	if params:
+		try:
+			return text.format(**params)
+		except (KeyError, IndexError, ValueError):
+			return text
+	return text
+
+
+def reason_text(kind, name, lang):
+	"""Alasan hari libur untuk ditampilkan. Nama libur dari database dipakai apa adanya."""
+	if kind == 'weekend':
+		return tr(lang, 'reason.weekend')
+	return name or tr(lang, 'reason.' + kind)
+
+
+def kiosk_bundle():
+	"""Kamus untuk halaman kiosk: {lang: {key: teks}} + nama hari/bulan, agar ganti bahasa tanpa reload."""
+	out = {}
+	for i, lang in enumerate(LANGS):
+		d = {k: v[i] for k, v in MESSAGES.items() if k.startswith(KIOSK_PREFIXES)}
+		d['_weekdays'] = WEEKDAYS[lang]
+		d['_months'] = MONTHS[lang]
+		out[lang] = d
+	return out
+
+
+def note_for(lang):
+	"""Teks belakang kartu: bisa diganti lewat ATTENDANCE_CARD_BACK_NOTE (string atau dict per bahasa)."""
+	custom = getattr(settings, 'ATTENDANCE_CARD_BACK_NOTE', None)
+	if isinstance(custom, dict):
+		return custom.get(lang) or custom.get('en') or tr(lang, 'card.note')
+	return custom or tr(lang, 'card.note')
+
+
+def contact_for(lang):
+	custom = getattr(settings, 'ATTENDANCE_CARD_CONTACT', '')
+	if isinstance(custom, dict):
+		return custom.get(lang) or custom.get('en') or ''
+	return custom or ''

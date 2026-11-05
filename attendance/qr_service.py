@@ -5,6 +5,7 @@ Semua aturan jam dan grup bisa diubah di settings.py lewat nama ATTENDANCE_* (li
 import datetime
 import hashlib
 import hmac
+import ipaddress
 import secrets
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,7 @@ from django.utils import timezone
 from employee.models import Employee
 from leave.models import Leaves
 from settings_app.utils import getnewid
+from attendance import qr_i18n
 from attendance.models import Attendance, AttendanceDiv, AttendanceStatus, NacionalHoliday, Tolerance
 from attendance.models_qr import AttendanceTime, QRCard, ScanDevice, ScanLog
 
@@ -30,6 +32,9 @@ _DEFAULTS = {
 	'ACTIVE_STATUS_ID': 1,     # Employee.status_id untuk pegawai aktif (sama seperti view lama)
 	'PRESENT_CODE': 'P',       # AttendanceStatus.code untuk hadir
 	'QR_SECRET': None,         # kunci tanda tangan QR; kosong = pakai SECRET_KEY
+	'KIOSK_ALLOWED_IPS': [],   # contoh ['192.168.1.0/24']; kosong = scan diterima dari jaringan mana pun
+	'REQUIRE_DEVICE_KEY': False,   # True = kiosk wajib memakai kunci perangkat (opsional)
+	'TRUST_PROXY_HEADER': False,   # True bila server di belakang proxy tepercaya (pakai X-Forwarded-For)
 }
 
 
@@ -97,6 +102,38 @@ def get_device(key):
 	return ScanDevice.objects.filter(key_sha256=hash_key(key), is_active=True).first()
 
 
+# ---------------------------------------------------------------- jaringan
+
+def client_ip(request):
+	if conf('TRUST_PROXY_HEADER'):
+		xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+		if xff:
+			return xff.split(',')[-1].strip()   # entri paling kanan ditambahkan proxy tepercaya
+	return request.META.get('REMOTE_ADDR', '')
+
+
+def ip_allowed(ip):
+	nets = conf('KIOSK_ALLOWED_IPS')
+	if not nets:
+		return True
+	try:
+		addr = ipaddress.ip_address(ip)
+	except ValueError:
+		return False
+	for net in nets:
+		try:
+			if addr in ipaddress.ip_network(net, strict=False):
+				return True
+		except ValueError:
+			continue
+	return False
+
+
+def security_is_open():
+	"""True bila scan bisa dikirim dari mana saja tanpa kunci perangkat (perlu peringatan ke admin)."""
+	return not conf('KIOSK_ALLOWED_IPS') and not conf('REQUIRE_DEVICE_KEY')
+
+
 # ---------------------------------------------------------------- data pegawai
 
 def division_q(div):
@@ -138,16 +175,16 @@ def photo_url(emp):
 # ---------------------------------------------------------------- hari libur dan cuti
 
 def day_off_reason(d):
-	"""Alasan hari ini bukan hari kerja, atau None. Libur dicocokkan lewat bulan dan tanggal,
-	sama seperti view absensi yang sudah ada."""
+	"""(jenis, nama) bila hari ini bukan hari kerja, selain itu None. Jenis: weekend, holiday, tolerance.
+	Libur dicocokkan lewat bulan dan tanggal, sama seperti view absensi yang sudah ada."""
 	if d.weekday() >= 5:
-		return 'Akhir pekan'
+		return 'weekend', ''
 	h = NacionalHoliday.objects.filter(date__month=d.month, date__day=d.day).exclude(is_active=False).first()
 	if h:
-		return h.name or 'Libur nasional'
+		return 'holiday', h.name or ''
 	t = Tolerance.objects.filter(date__month=d.month, date__day=d.day).exclude(is_active=False).first()
 	if t:
-		return t.name or 'Hari toleransi'
+		return 'tolerance', t.name or ''
 	return None
 
 
@@ -158,78 +195,75 @@ def active_leave(emp, d):
 
 # ---------------------------------------------------------------- scan
 
-def _result(ok, code, level, title, message, emp=None, **extra):
-	res = {'ok': ok, 'code': code, 'level': level, 'title': title, 'message': message,
+def _result(ok, result_code, level, emp, lang, **params):
+	"""Hasil scan untuk layar kiosk. Judul dan pesan diambil dari qr_i18n (res.<result_code>.title / .msg)."""
+	res = {'ok': ok, 'code': result_code, 'level': level,
+		   'title': qr_i18n.tr(lang, 'res.%s.title' % result_code, **params),
+		   'message': qr_i18n.tr(lang, 'res.%s.msg' % result_code, **params),
 		   'employee': employee_info(emp) if emp else None, 'employee_id': emp.pk if emp else None}
-	res.update(extra)
+	if 'time' in params:
+		res['time'] = params['time']
 	return res
 
 
-def process_scan(raw, device=None, now=None):
+def process_scan(raw, device=None, now=None, lang=None, ip=None):
 	"""Memproses satu scan dan mencatatnya di ScanLog. Mengembalikan dict untuk layar kiosk."""
 	now = now or timezone.now()
-	res = _process(raw, device, now)
+	lang = qr_i18n.norm(lang)
+	res = _process(raw, device, now, lang)
 	ScanLog.objects.create(employee_id=res['employee_id'], device=device, scanned_at=now,
-						   code=res['code'], message=res['message'][:200])
+						   code=res['code'], message=res['message'][:200], ip=ip or None)
 	return res
 
 
-def _process(raw, device, now):
+def _process(raw, device, now, lang):
 	parsed = parse_payload(raw)
 	if not parsed:
-		return _result(False, 'invalid', 'error', 'QR tidak dikenal', 'Kartu ini bukan kartu absensi yang sah.')
+		return _result(False, 'invalid', 'error', None, lang)
 	emp_id, version = parsed
 	emp = (Employee.objects.select_related('employeeposition__position', 'employeedivision__division')
 		   .filter(pk=emp_id).first())
 	card = QRCard.objects.filter(employee_id=emp_id).first()
 	if not emp or not card or not card.is_active or card.version != version:
-		return _result(False, 'revoked', 'error', 'Kartu tidak berlaku',
-					   'Kartu ini sudah diganti atau dinonaktifkan. Hubungi admin.', emp)
+		return _result(False, 'revoked', 'error', emp, lang)
 	if emp.status_id != conf('ACTIVE_STATUS_ID'):
-		return _result(False, 'inactive', 'error', 'Pegawai tidak aktif', 'Hubungi admin.', emp)
+		return _result(False, 'inactive', 'error', emp, lang)
 
 	local = to_local(now)
 	today = local.date()
 	member = getattr(emp, 'employeecard', None)
 	if member and (not member.is_active or (member.expiry_date and member.expiry_date < today)):
-		return _result(False, 'card_expired', 'error', 'Kartu kedaluwarsa',
-					   'Masa berlaku kartu pegawai sudah habis. Hubungi admin.', emp)
+		return _result(False, 'card_expired', 'error', emp, lang)
 
-	reason = day_off_reason(today)
-	if reason:
-		return _result(False, 'holiday', 'error', 'Hari libur',
-					   '{}. Absensi tidak dicatat hari ini.'.format(reason), emp)
+	off = day_off_reason(today)
+	if off:
+		return _result(False, 'holiday', 'error', emp, lang, reason=qr_i18n.reason_text(off[0], off[1], lang))
 
 	leave = active_leave(emp, today)
 	if leave:
-		kind = leave.leave_type.name if leave.leave_type and leave.leave_type.name else 'Cuti'
-		return _result(False, 'leave', 'leave', 'Sedang cuti',
-					   'Status Anda hari ini: {} (sampai {}). Absensi tidak diubah.'.format(
-						   kind, leave.end_date.strftime('%d/%m/%Y')), emp)
+		kind = leave.leave_type.name if leave.leave_type and leave.leave_type.name else qr_i18n.tr(lang, 'leave.default')
+		return _result(False, 'leave', 'leave', emp, lang, kind=kind, end=leave.end_date.strftime('%d/%m/%Y'))
 
 	div = employee_division(emp)
 	if div and AttendanceDiv.objects.filter(div=div, year=today.year, month=today.month, is_final=True).exists():
-		return _result(False, 'month_final', 'error', 'Bulan sudah final',
-					   'Absensi bulan ini sudah difinalkan. Hubungi admin.', emp)
+		return _result(False, 'month_final', 'error', emp, lang)
 
 	present = AttendanceStatus.objects.filter(code=conf('PRESENT_CODE')).first()
 	if not present:
-		return _result(False, 'config', 'error', 'Pengaturan belum lengkap',
-					   'Status hadir (kode {}) belum ada di AttendanceStatus.'.format(conf('PRESENT_CODE')), emp)
+		return _result(False, 'config', 'error', emp, lang, code=conf('PRESENT_CODE'))
 
 	with transaction.atomic():
 		Employee.objects.select_for_update().get(pk=emp.pk)  # satu scan per pegawai pada satu waktu
 		att = Attendance.objects.filter(employee=emp, date=today).order_by('id').first()
 		st = getattr(att, 'scantime', None) if att else None
 		if att and not st:
-			return _result(False, 'manual', 'error', 'Sudah diisi admin',
-						   'Absensi hari ini sudah diisi manual oleh admin, scan tidak diterima.', emp)
+			return _result(False, 'manual', 'error', emp, lang)
 		if not att:
-			return _first_scan(emp, div, present, device, now, local, today)
-		return _next_scan(emp, att, st, present, now, local)
+			return _first_scan(emp, div, present, device, now, local, today, lang)
+		return _next_scan(emp, att, st, present, now, local, lang)
 
 
-def _first_scan(emp, div, present, device, now, local, today):
+def _first_scan(emp, div, present, device, now, local, today, lang):
 	after_noon = local.time() >= conf_time('NOON')
 	late = after_noon or local.time() > conf_time('LATE_AFTER')
 	att = None
@@ -245,31 +279,28 @@ def _first_scan(emp, div, present, device, now, local, today):
 		except IntegrityError:
 			continue
 	if att is None:
-		return _result(False, 'busy', 'error', 'Coba lagi', 'Sistem sibuk, scan ulang kartu Anda.', emp)
+		return _result(False, 'busy', 'error', emp, lang)
 	AttendanceTime.objects.create(attendance=att, check_in=now, check_out=now if after_noon else None,
 								  is_late=late, device=device)
 	if late:
-		return _result(True, 'in_late', 'warn', 'Masuk tercatat (terlambat)',
-					   'Masuk pukul {}. Batas masuk {}.'.format(hhmm(now), conf('LATE_AFTER')), emp, time=hhmm(now))
-	return _result(True, 'in', 'success', 'Selamat datang', 'Masuk pukul {}.'.format(hhmm(now)), emp, time=hhmm(now))
+		return _result(True, 'in_late', 'warn', emp, lang, time=hhmm(now), limit=conf('LATE_AFTER'))
+	return _result(True, 'in', 'success', emp, lang, time=hhmm(now))
 
 
-def _next_scan(emp, att, st, present, now, local):
+def _next_scan(emp, att, st, present, now, local, lang):
 	last = st.check_out or st.check_in
 	if (now - last).total_seconds() < conf('DUPLICATE_SECONDS'):
-		return _result(True, 'duplicate', 'info', 'Sudah discan', 'Kartu Anda baru saja discan.', emp)
+		return _result(True, 'duplicate', 'info', emp, lang)
 	if local.time() < conf_time('NOON'):
-		return _result(True, 'already_in', 'info', 'Sudah tercatat masuk',
-					   'Masuk pukul {}. Scan lagi saat pulang.'.format(hhmm(st.check_in)), emp, time=hhmm(st.check_in))
+		return _result(True, 'already_in', 'info', emp, lang, time=hhmm(st.check_in))
 	st.check_out = now
 	st.save(update_fields=['check_out'])
 	if att.status_pm_id != present.pk:
 		att.status_pm = present
 		att.save(update_fields=['status_pm'])
 	if local.time() < conf_time('WORK_END'):
-		return _result(True, 'out_early', 'warn', 'Pulang awal tercatat',
-					   'Pulang pukul {}. Jam pulang kantor {}.'.format(hhmm(now), conf('WORK_END')), emp, time=hhmm(now))
-	return _result(True, 'out', 'success', 'Sampai jumpa', 'Pulang pukul {}.'.format(hhmm(now)), emp, time=hhmm(now))
+		return _result(True, 'out_early', 'warn', emp, lang, time=hhmm(now), limit=conf('WORK_END'))
+	return _result(True, 'out', 'success', emp, lang, time=hhmm(now))
 
 
 # ---------------------------------------------------------------- rekap bulanan
@@ -298,7 +329,7 @@ def month_report(year, month, division=None, employee=None):
 		date = first_day.replace(day=d)
 		reason = day_off_reason(date)
 		if reason:
-			off[d] = ('W' if date.weekday() >= 5 else 'H', reason)
+			off[d] = ('W' if reason[0] == 'weekend' else 'H', reason)
 
 	emps = (Employee.objects.filter(status_id=conf('ACTIVE_STATUS_ID'))
 			.select_related('employeeposition__position', 'employeedivision__division', 'idfnumber'))

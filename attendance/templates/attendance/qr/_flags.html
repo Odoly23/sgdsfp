@@ -1,0 +1,9 @@
+<span class="qr-flags" role="group" aria-label="Language">
+{% for f in items %}
+	{% if mode == 'link' %}
+		<a class="qr-flag{% if f.on %} on{% endif %}" href="{% url 'qr-lang' f.code %}?next={{ next|urlencode }}" title="{{ f.name }}" hreflang="{{ f.code }}">{{ f.svg }}<b>{{ f.code|upper }}</b></a>
+	{% else %}
+		<button type="button" class="qr-flag{% if f.on %} on{% endif %}" data-lang="{{ f.code }}" title="{{ f.name }}">{{ f.svg }}<b>{{ f.code|upper }}</b></button>
+	{% endif %}
+{% endfor %}
+</span>

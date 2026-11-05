@@ -2,10 +2,12 @@ from django.urls import path
 from . import views_qr as v
 
 urlpatterns = [
-	# halaman kiosk (tanpa login, dilindungi kunci perangkat)
+	# halaman kiosk (tanpa login; dibatasi jaringan kantor, kunci perangkat opsional)
 	path('kiosk/', v.kiosk, name="qr-kiosk"),
 	path('kiosk/scan/', v.kiosk_scan, name="qr-kiosk-scan"),
 	path('kiosk/check/', v.kiosk_check, name="qr-kiosk-check"),
+
+	path('lang/<str:code>/', v.set_lang, name="qr-lang"),
 
 	path('today/', v.today, name="qr-today"),
 

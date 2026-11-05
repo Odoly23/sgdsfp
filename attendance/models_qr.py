@@ -53,6 +53,7 @@ class ScanLog(models.Model):
 	scanned_at = models.DateTimeField()
 	code = models.CharField(max_length=20)
 	message = models.CharField(max_length=200, blank=True)
+	ip = models.GenericIPAddressField(null=True, blank=True)
 
 	class Meta:
 		ordering = ['-scanned_at']

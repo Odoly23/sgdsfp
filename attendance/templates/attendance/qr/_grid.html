@@ -1,23 +1,24 @@
+{% load qr_i18n %}
 <div class="rp-legend">
-	<span><i class="rp-P"></i>Hadir</span><span><i class="rp-P late"></i>Hadir, terlambat</span>
-	<span><i class="rp-L"></i>Cuti</span><span><i class="rp-F"></i>Alpha</span><span><i class="rp-W"></i>Libur / akhir pekan</span>
-	<span>↓ belum scan pulang · ↑ pulang awal</span>
+	<span><i class="rp-P"></i>{% t 'legend.present' %}</span><span><i class="rp-P late"></i>{% t 'legend.late' %}</span>
+	<span><i class="rp-L"></i>{% t 'legend.leave' %}</span><span><i class="rp-F"></i>{% t 'legend.absent' %}</span><span><i class="rp-W"></i>{% t 'legend.off' %}</span>
+	<span>{% t 'legend.flags' %}</span>
 </div>
 <div class="qr-scroll"><table class="rp-table">
-	<thead><tr><th class="rp-name">Pegawai</th>
+	<thead><tr><th class="rp-name">{% t 'th.emp' %}</th>
 		{% for d in rep.days %}<th>{{ d }}</th>{% endfor %}
-		<th>Hari kerja</th><th>Hadir</th><th>Terlambat</th><th>Cuti</th><th>Alpha</th></tr></thead>
+		<th>{% t 'th.workdays' %}</th><th>{% t 'th.present' %}</th><th>{% t 'th.late' %}</th><th>{% t 'th.leave' %}</th><th>{% t 'th.absent' %}</th></tr></thead>
 	<tbody>
 	{% for r in rows %}
 		<tr><td class="rp-name">{{ r.employee.name }}<small>{{ r.employee.position }}{% if r.employee.division %} · {{ r.employee.division }}{% endif %}</small></td>
 		{% for c in r.cells %}
-			<td title="{% if c.in %}Masuk {{ c.in }}{% if c.out %} · Pulang {{ c.out }}{% endif %}{% endif %}">
+			<td{% if c.in %} title="{% t 'grid.in' %} {{ c.in }}{% if c.out %} · {% t 'grid.out' %} {{ c.out }}{% endif %}"{% endif %}>
 				{% if c.code %}<div class="rp-c rp-{{ c.code }}{% if c.late %} late{% endif %}">{{ c.code }}</div>{% endif %}
 				{% if c.no_out %}<span class="rp-flag">↓</span>{% elif c.early %}<span class="rp-flag">↑</span>{% endif %}
 			</td>
 		{% endfor %}
 		<td>{{ r.totals.workdays }}</td><td><b>{{ r.totals.present }}</b></td><td>{{ r.totals.late }}</td><td>{{ r.totals.leave }}</td><td>{{ r.totals.absent }}</td></tr>
-	{% empty %}<tr><td colspan="40" class="qr-sub" style="text-align:left;padding:14px">Tidak ada data.</td></tr>
+	{% empty %}<tr><td colspan="40" class="qr-sub" style="text-align:left;padding:14px">{% t 'grid.empty' %}</td></tr>
 	{% endfor %}
 	</tbody>
 </table></div>

@@ -1,43 +1,52 @@
-{% load static %}<!DOCTYPE html>
-<html lang="id">
+{% load static qr_i18n %}<!DOCTYPE html>
+<html lang="{{ lang }}">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Absensi MDI</title>
+	<title>MDI</title>
 	<link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
 </head>
-<body class="kiosk" data-scan-url="{% url 'qr-kiosk-scan' %}" data-check-url="{% url 'qr-kiosk-check' %}" data-tz="{{ tz }}">
+<body class="kiosk" data-scan-url="{% url 'qr-kiosk-scan' %}" data-check-url="{% url 'qr-kiosk-check' %}" data-tz="{{ tz }}" data-late="{{ late_after }}" data-end="{{ work_end }}">
 	<header class="k-top">
 		<div style="display:flex;align-items:center;gap:16px">
 			<img src="{% static 'attendance/qr/mdi-logo.jpg' %}" alt="MDI">
-			<div><h1>ABSENSI PEGAWAI</h1><small>Mata Dalan Institute</small></div>
+			<div><h1 data-i18n="k.title">{% t 'k.title' %}</h1><small>Mata Dalan Institute</small></div>
 		</div>
-		<small>Masuk sampai {{ late_after }} · Pulang mulai {{ work_end }}</small>
+		<div class="k-top-right">
+			{% flags 'js' %}
+			<small data-i18n="k.hours">{% t 'k.hours' late=late_after end=work_end %}</small>
+		</div>
 	</header>
 	<main class="k-main">
 		<section class="k-clock">
 			<div class="k-time" id="clock">--:--:--</div>
 			<div class="k-date" id="today"></div>
-			<div class="k-hint">Tempelkan QR kartu member ke scanner</div>
-			<div class="k-rules">Scan pertama = masuk · Scan terakhir = pulang</div>
+			<div class="k-hint" data-i18n="k.hint">{% t 'k.hint' %}</div>
+			<div class="k-rules" data-i18n="k.rule">{% t 'k.rule' %}</div>
 		</section>
 		<section class="k-result" id="result" aria-live="polite"></section>
 	</main>
 	<footer class="k-foot">
-		<span>Jika layar tidak merespons, klik di mana saja lalu scan ulang.</span>
-		<span><button id="btn-cam" style="display:none">Pakai kamera</button> <button id="btn-key">Kunci perangkat</button></span>
+		<span>
+			<span id="st-srv" class="k-chip"></span><span id="st-scn" class="k-chip"></span>
+			<span data-i18n="k.foot">{% t 'k.foot' %}</span>
+		</span>
+		<span>
+			<button id="btn-cam" data-i18n="k.cam_on" style="display:none">{% t 'k.cam_on' %}</button>
+			<button id="btn-key" data-i18n="k.key_btn" style="display:none">{% t 'k.key_btn' %}</button>
+		</span>
 	</footer>
-	<input id="scan-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Input scanner">
 	<video id="cam" class="k-cam" muted playsinline></video>
 	<div class="k-setup" id="setup">
 		<form id="setup-form">
-			<h2>Pasang perangkat kiosk</h2>
-			<p>Masukkan kunci perangkat dari admin (menu Perangkat kiosk). Cukup sekali di PC ini.</p>
-			<input id="setup-key" type="password" placeholder="Kunci perangkat" autocomplete="off">
+			<h2 data-i18n="k.setup_title">{% t 'k.setup_title' %}</h2>
+			<p data-i18n="k.setup_desc">{% t 'k.setup_desc' %}</p>
+			<input id="setup-key" type="password" data-i18n-ph="k.setup_ph" placeholder="{% t 'k.setup_ph' %}" autocomplete="off">
 			<div class="k-err" id="setup-err"></div>
-			<button class="go" type="submit">Simpan</button>
+			<button class="go" type="submit" data-i18n="k.setup_save">{% t 'k.setup_save' %}</button>
 		</form>
 	</div>
+	{{ bundle|json_script:"i18n" }}
 	<script src="{% static 'attendance/qr/kiosk.js' %}"></script>
 </body>
 </html>

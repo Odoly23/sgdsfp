@@ -9,10 +9,12 @@ Salin ke folder `attendance/` proyek Anda (struktur sama dengan repo ini):
 
 ```
 attendance/models_qr.py        model: QRCard, ScanDevice, AttendanceTime, ScanLog
-attendance/qr_service.py       aturan scan, tanda tangan QR, rekap
-attendance/views_qr.py         halaman kiosk, hari ini, kartu, perangkat, rekap
+attendance/qr_service.py       aturan scan, tanda tangan QR, jaringan, rekap
+attendance/qr_i18n.py          semua teks 4 bahasa (Tetun, English, Indonesia, Português)
+attendance/views_qr.py         halaman kiosk, hari ini, kartu, perangkat, rekap, ganti bahasa
 attendance/urls_qr.py
-attendance/tests_qr.py         45 tes otomatis
+attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %})
+attendance/tests_qr.py         71 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, mdi-logo.jpg)
 ```
@@ -41,33 +43,44 @@ python manage.py test attendance.tests_qr
 ```
 Migrasi hanya membuat 4 tabel baru. Kolom di tabel `Attendance` yang ada tidak diubah.
 
-## 3. Pengaturan (`settings.py`) — semuanya opsional kecuali QR_SECRET
+## 3. Pengaturan (`settings.py`) — semuanya opsional, tapi dua yang pertama sangat disarankan
 
 ```python
-ATTENDANCE_QR_SECRET = os.environ['ATTENDANCE_QR_SECRET']   # SANGAT disarankan, lihat catatan
+ATTENDANCE_QR_SECRET = os.environ['ATTENDANCE_QR_SECRET']   # kunci tanda tangan QR, lihat catatan
+ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']           # jaringan kantor; kosong = dari mana saja
 ATTENDANCE_TIME_ZONE = 'Asia/Dili'      # zona waktu absensi saja; TIME_ZONE proyek tidak diubah
+ATTENDANCE_DEFAULT_LANG = 'tet'         # tet | en | id | pt
+ATTENDANCE_LANG_IN_NAVBAR = False       # True setelah bendera ditempel di navbar (bagian 4)
 ATTENDANCE_LATE_AFTER = '08:15'         # masuk setelah jam ini = terlambat
 ATTENDANCE_NOON = '12:00'               # sebelum = scan masuk (AM), sesudah = pulang (PM)
 ATTENDANCE_WORK_END = '16:00'           # pulang sebelum jam ini ditandai "pulang awal"
 ATTENDANCE_DUPLICATE_SECONDS = 60
 ATTENDANCE_ACTIVE_STATUS_ID = 1         # Employee.status_id pegawai aktif
 ATTENDANCE_PRESENT_CODE = 'P'           # AttendanceStatus.code untuk hadir
+ATTENDANCE_REQUIRE_DEVICE_KEY = False   # True = kiosk wajib memakai kunci perangkat (opsional)
+ATTENDANCE_TRUST_PROXY_HEADER = False   # True hanya bila server di belakang proxy tepercaya (Nginx)
 ATTENDANCE_MANAGER_GROUPS = ['admin', 'staff']              # kartu QR
 ATTENDANCE_VIEWER_GROUPS = ['admin', 'staff', 'president']  # hari ini + rekap
 ATTENDANCE_DEVICE_GROUPS = ['admin']                        # kunci perangkat kiosk
 ATTENDANCE_SELF_GROUPS = ['admin', 'staff', 'president', 'funsionario']
-ATTENDANCE_CARD_BACK_NOTE = '...'       # teks di sisi belakang kartu
-ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (opsional)
+ATTENDANCE_CARD_BACK_NOTE = {'tet': '...', 'en': '...', 'id': '...', 'pt': '...'}  # atau satu string
+ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (string atau dict per bahasa)
 ```
 
-**Catatan `ATTENDANCE_QR_SECRET`:** kalau kosong, tanda tangan QR memakai `SECRET_KEY`. Lalu mengganti
+**`ATTENDANCE_QR_SECRET`:** kalau kosong, tanda tangan QR memakai `SECRET_KEY`. Lalu mengganti
 `SECRET_KEY` (yang sebaiknya segera dilakukan karena sudah tampil di chat) membuat **semua kartu tidak berlaku**.
 Dengan `ATTENDANCE_QR_SECRET` terpisah, kartu tetap aman walau `SECRET_KEY` diganti. Isi dengan string acak panjang
 dan jangan diubah setelah kartu dicetak.
 
-## 4. Menu
+**`ATTENDANCE_KIOSK_ALLOWED_IPS`:** kiosk tidak memakai kunci lagi, jadi pembatas utamanya adalah jaringan.
+Tanpa ini, orang yang bisa membuka alamat server dan punya foto QR kartunya bisa absen dari rumah. Selama kosong,
+halaman admin menampilkan peringatan merah. Isi dengan alamat jaringan kantor (CIDR atau satu alamat).
+Jika server di belakang Nginx/proxy, set `ATTENDANCE_TRUST_PROXY_HEADER = True`; alamat klien diambil dari entri
+**paling kanan** `X-Forwarded-For` (yang ditambahkan proxy Anda, tidak bisa dipalsukan klien).
 
-Tambahkan ke menu tiap grup (mis. di `adm.html`), contoh gaya yang sama dengan menu lama:
+## 4. Menu dan bendera bahasa
+
+Menu (mis. di `adm.html`), gaya sama dengan menu lama:
 ```html
 <li class="nav-item dropdown active">
 	<a class="nav-link dropdown-toggle" href="#" data-toggle="dropdown"><i class="fa fa-qrcode"></i> ABSENSI QR</a>
@@ -82,15 +95,38 @@ Tambahkan ke menu tiap grup (mis. di `adm.html`), contoh gaya yang sama dengan m
 Grup `funsionario` cukup tautan ke `{% url 'qr-me' %}`. Halaman sendiri sudah memeriksa grup, jadi
 menu yang salah tidak membuka akses.
 
+**Bendera di topbar kanan:** tempel satu baris ini di setiap menu navbar (`adm.html`, `staff.html`, ...),
+tepat sebelum menu profil (`<li class="nav-item dropdown active">` yang berisi `request.user.username`):
+```html
+{% include 'attendance/qr/_navbar_lang.html' %}
+```
+lalu set `ATTENDANCE_LANG_IN_NAVBAR = True`. Selama belum ditempel, bendera tampil di baris tombol di dalam
+halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di header kanan.
+
 ## 5. Pasang di kantor (sekali saja)
 
-1. Login sebagai `admin` → **Perangkat kiosk** → beri nama "PC Pintu" → **Buat kunci** → salin kunci (tampil sekali).
-2. Di PC pintu, buka `https://<server>/attendance/qr/kiosk/` dalam layar penuh (F11), tempel kunci. Kunci tersimpan di browser PC itu.
-3. Colok scanner QR USB (mode "keyboard/HID", akhiran Enter). Tidak perlu driver.
-4. **Kartu QR** → pilih pegawai → **Cetak kartu terpilih** → atur kertas 85,6 × 54 mm tanpa margin → cetak
-   depan+belakang → **Tandai sudah dicetak**.
+1. Colok scanner QR USB ke PC pintu (mode "keyboard/HID", akhiran Enter, default hampir semua scanner). Tanpa driver.
+2. Buka `http://<server>/attendance/qr/kiosk/` di browser PC itu, layar penuh (F11). **Selesai**: tidak ada kunci,
+   tidak perlu klik atau fokus. Dua penanda di kiri bawah: "Server terhubung" dan "Scanner terdeteksi"
+   (hijau setelah scan pertama). Scanner yang tidak mengirim Enter tetap terbaca otomatis.
+3. **Kartu QR** → pilih pegawai → **Cetak kartu terpilih** → pilih bahasa kartu (bendera) → atur kertas 85,6 × 54 mm
+   tanpa margin → cetak depan+belakang → **Tandai sudah dicetak**.
 
+Kunci perangkat masih ada sebagai pilihan (menu **Perangkat kiosk** + `ATTENDANCE_REQUIRE_DEVICE_KEY = True`).
 Kamera hanya cadangan (tombol "Pakai kamera", Chrome/Edge) dan butuh HTTPS atau `localhost`.
+
+## Bahasa
+
+Empat bahasa: **Tetun (TET), English (EN), Indonesia (ID), Português (PT)**. Bawaan Tetun (`ATTENDANCE_DEFAULT_LANG`).
+- **Kiosk:** klik bendera di header kanan, teks berganti seketika tanpa memuat ulang. Hasil scan berikutnya
+  juga memakai bahasa itu.
+- **Halaman admin:** klik bendera, halaman dimuat ulang dalam bahasa baru. Pilihan tersimpan di cookie `mdi_lang`
+  (satu tahun), jadi sama untuk kiosk dan admin di browser yang sama.
+- **Cetak kartu:** bendera di toolbar mengganti teks kartu seketika (judul, "No.", masa berlaku, pesan belakang,
+  "Scan saat masuk & pulang"). Yang tercetak adalah bahasa yang sedang tampil. Nama pegawai, jabatan, dan nama
+  libur/cuti dari database tidak diterjemahkan.
+- Semua teks ada di `qr_i18n.py` (`MESSAGES`). Tes memastikan setiap kunci punya keempat bahasa dan placeholder yang sama.
+  **Teks Tetun sebaiknya dibaca ulang oleh penutur asli** sebelum dipakai resmi.
 
 ## Aturan yang berlaku
 
@@ -104,6 +140,7 @@ Kamera hanya cadangan (tombol "Pakai kamera", Chrome/Edge) dan butuh HTTPS atau 
 | Hari itu sudah diisi manual oleh admin | Ditolak |
 | `AttendanceDiv.is_final` bulan itu | Ditolak |
 | QR salah/dipalsukan, kartu diganti, kartu kedaluwarsa, pegawai non-aktif | Ditolak, tercatat di `ScanLog` |
+| Scan dari alamat di luar `ATTENDANCE_KIOSK_ALLOWED_IPS` | Ditolak (403), tidak tercatat |
 | Tidak ada scan di hari kerja yang sudah lewat | Dihitung Alpha (F) di rekap, tanpa menulis baris |
 
 Hari libur dicocokkan lewat bulan dan tanggal saja (seperti view lama): libur 20 Mei berlaku setiap tahun.
@@ -112,7 +149,8 @@ Hari libur dicocokkan lewat bulan dan tanggal saja (seperti view lama): libur 20
 
 - QR berisi `MDI.<id pegawai>.<versi>.<HMAC-SHA256>`. Tidak ada token yang disimpan. Kartu hilang → **Ganti QR**
   (versi naik, kartu lama langsung mati).
-- Kunci perangkat kiosk hanya disimpan sebagai SHA-256. Scan tanpa kunci yang sah ditolak (401), jadi scan dari HP tidak bisa.
+- Tanpa kunci perangkat, pembatas absen-dari-rumah adalah `ATTENDANCE_KIOSK_ALLOWED_IPS`. **Isi ini** setelah kiosk
+  berjalan. Kalau memakai kunci perangkat, hanya sidik SHA-256-nya yang disimpan.
 - Kolom `hashed` di `Attendance` tetap MD5 dari `getnewid()` karena kolomnya 32 karakter dan view lama mencari lewat itu.
   SHA-256 dipakai untuk bagian baru (QR dan kunci perangkat).
-- Setiap scan, termasuk yang ditolak, tercatat di `ScanLog`.
+- Setiap scan yang sampai ke server, termasuk yang ditolak, tercatat di `ScanLog` beserta alamat IP-nya.

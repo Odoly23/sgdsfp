@@ -1,50 +1,61 @@
-{% load static %}<!DOCTYPE html>
-<html lang="id">
+{% load static qr_i18n %}<!DOCTYPE html>
+<html lang="{{ lang }}">
 <head>
 	<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Cetak Kartu MDI</title>
+	<title>{{ title }}</title>
 	<link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
 </head>
 <body class="cardsheet">
 	<div class="cs-bar">
-		<b>{{ items|length }} kartu</b>
+		<b>{% t 'cp.count' n=items|length %}</b>
 		<span>
-			<label><input type="radio" name="side" value="both" checked> Depan + belakang</label>
-			<label><input type="radio" name="side" value="front"> Depan saja</label>
-			<label><input type="radio" name="side" value="back"> Belakang saja</label>
+			<label><input type="radio" name="side" value="both" checked> {% t 'cp.both' %}</label>
+			<label><input type="radio" name="side" value="front"> {% t 'cp.front' %}</label>
+			<label><input type="radio" name="side" value="back"> {% t 'cp.back' %}</label>
 		</span>
-		<button onclick="window.print()" style="padding:8px 16px;border:0;border-radius:8px;background:#e3171e;color:#fff;cursor:pointer">Cetak</button>
-		<span style="color:#6f6a62;font-size:.85rem">Atur kertas: ukuran 85,6 × 54 mm, tanpa margin, skala 100%. Untuk printer dua sisi, pilih "Depan + belakang".</span>
+		<span><label>{% t 'cp.card_lang' %}</label>{% flags 'js' %}</span>
+		<button onclick="window.print()" style="padding:8px 16px;border:0;border-radius:8px;background:#e3171e;color:#fff;cursor:pointer">{% t 'cp.print' %}</button>
+		<span style="color:#6f6a62;font-size:.85rem">{% t 'cp.help' %}</span>
 	</div>
 	<div class="cs-wrap">
 	{% for c in items %}
 		<div class="mdi-card front">
-			<div class="band"><img src="{% static 'attendance/qr/mdi-logo.jpg' %}" alt=""><div><b>MATA DALAN INSTITUTE</b><small>KARTU PEGAWAI</small></div></div>
+			<div class="band"><img src="{% static 'attendance/qr/mdi-logo.jpg' %}" alt=""><div><b>MATA DALAN INSTITUTE</b><small>{% t4 'card.kind' %}</small></div></div>
 			{% if c.photo %}<img class="photo" src="{{ c.photo }}" alt="">{% else %}<div class="photo"></div>{% endif %}
 			<div class="info">
 				<div class="nm">{{ c.name }}</div>
 				<div class="ps">{{ c.position|default:"-" }}</div>
 				<div class="un">{{ c.division }}</div>
-				<div class="no"><span>No.</span> {{ c.number }}</div>
-				{% if c.expiry %}<div class="no"><span>Berlaku s/d</span> {{ c.expiry|date:"d/m/Y" }}</div>{% endif %}
+				<div class="no"><span>{% t4 'card.no' %}</span> {{ c.number }}</div>
+				{% if c.expiry %}<div class="no"><span>{% t4 'card.valid' %}</span> {{ c.expiry|date:"d/m/Y" }}</div>{% endif %}
 			</div>
 			<div class="stripe"><span>M D I</span><span>{{ c.name|truncatechars:26 }}</span></div>
 		</div>
 		<div class="mdi-card back">
-			<div class="txt"><b>Kartu Absensi</b>{{ note }}{% if contact %}<div class="ct">{{ contact }}</div>{% endif %}</div>
+			<div class="txt"><b>{% t4 'card.att' %}</b>
+				{% for n in notes %}<span data-l="{{ n.code }}"{% if n.hidden %} hidden{% endif %}>{{ n.note }}{% if n.contact %}<span class="ct">{{ n.contact }}</span>{% endif %}</span>{% endfor %}
+			</div>
 			<div class="qrbox">{{ c.qr }}</div>
-			<div class="qrcap">Scan saat masuk &amp; pulang</div>
+			<div class="qrcap">{% t4 'card.scan' %}</div>
 			<div class="stripe"><span>MATA DALAN INSTITUTE</span><span>{{ c.number }}</span></div>
 		</div>
-	{% empty %}<p style="padding:24px">Tidak ada kartu aktif untuk dicetak.</p>
+	{% empty %}<p style="padding:24px">{% t 'cp.empty' %}</p>
 	{% endfor %}
 	</div>
 	<form method="post" action="{% url 'qr-card-action' %}" class="cs-foot">
 		{% csrf_token %}{% for i in ids %}<input type="hidden" name="ids" value="{{ i }}">{% endfor %}
 		<input type="hidden" name="action" value="printed">
-		<span>Sudah selesai mencetak?</span> <button type="submit" style="padding:8px 16px;border-radius:8px;border:1px solid #e3171e;background:#fff;color:#a80f14;cursor:pointer">Tandai sudah dicetak</button>
+		<span>{% t 'cp.done_q' %}</span> <button type="submit" style="padding:8px 16px;border-radius:8px;border:1px solid #e3171e;background:#fff;color:#a80f14;cursor:pointer">{% t 'cp.mark' %}</button>
 	</form>
 	<script>
+		/* ganti bahasa kartu langsung (hanya teks pada kartu), lalu cetak sesuai bahasa yang tampil */
+		function cardLang(l) {
+			document.documentElement.lang = l;
+			document.querySelectorAll('[data-l]').forEach(function (s) { s.hidden = s.dataset.l !== l; });
+			document.querySelectorAll('.qr-flag').forEach(function (b) { b.classList.toggle('on', b.dataset.lang === l); });
+			document.cookie = 'mdi_lang=' + l + '; path=/; max-age=31536000; SameSite=Lax';
+		}
+		document.querySelectorAll('.qr-flag').forEach(function (b) { b.addEventListener('click', function () { cardLang(b.dataset.lang); }); });
 		document.querySelectorAll('input[name=side]').forEach(function (r) {
 			r.addEventListener('change', function () { document.body.className = 'cardsheet' + (r.value === 'both' ? '' : ' only-' + r.value); });
 		});

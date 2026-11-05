@@ -7,6 +7,7 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
 
 from custom.models import DG, Division
 from employee.models import Employee, EmployeeCard, EmployeeDivision, EmployeePosition, IDFNumber
@@ -270,6 +271,7 @@ class ViewTests(QRBase):
 		u = User.objects.create_user('u_' + group, password='x')
 		u.groups.add(Group.objects.get_or_create(name=group)[0])
 		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
 		return u
 
 	def api(self, code, key=None):
@@ -284,10 +286,17 @@ class ViewTests(QRBase):
 	def test_kiosk_page_is_public(self):
 		r = self.client.get(reverse('qr-kiosk'))
 		self.assertEqual(r.status_code, 200)
-		self.assertContains(r, 'scan-input')
+		self.assertContains(r, 'id="clock"')
 		self.assertContains(r, 'Asia/Dili')
 
-	def test_scan_api_requires_device_key(self):
+	def test_scan_works_without_device_key_by_default(self):
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			r = self.api(self.payload)
+		self.assertEqual((r.status_code, r.json()['code']), (200, 'in'))
+		self.assertIsNone(ScanLog.objects.get().device)
+
+	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=True)
+	def test_scan_api_requires_device_key_when_enabled(self):
 		self.assertEqual(self.api(self.payload).status_code, 401)
 		self.assertEqual(self.api(self.payload, key='nope').status_code, 401)
 		self.assertEqual(ScanLog.objects.count(), 0)
@@ -297,6 +306,7 @@ class ViewTests(QRBase):
 		key = self.device()
 		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
 			r = self.api(self.payload, key)
+		self.assertEqual(ScanLog.objects.get().ip, '127.0.0.1')
 		data = r.json()
 		self.assertEqual((r.status_code, data['ok'], data['code']), (200, True, 'in'))
 		self.assertNotIn('employee_id', data)
@@ -311,10 +321,15 @@ class ViewTests(QRBase):
 		self.assertEqual(r.json()['code'], 'invalid')
 		self.assertEqual(self.client.get(reverse('qr-kiosk-scan')).status_code, 405)
 
-	def test_kiosk_check(self):
+	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=True)
+	def test_kiosk_check_with_required_key(self):
 		key = self.device()
 		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY=key).status_code, 200)
 		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY='x').status_code, 401)
+
+	def test_kiosk_check_open_by_default(self):
+		r = self.client.get(reverse('qr-kiosk-check'))
+		self.assertEqual((r.status_code, r.json()['state']), (200, 'ok'))
 
 	def test_pages_require_login(self):
 		for name in ['qr-today', 'qr-devices', 'qr-cards', 'qr-report', 'qr-me']:
@@ -332,18 +347,18 @@ class ViewTests(QRBase):
 
 	def test_group_permissions(self):
 		self.login('president')
-		self.assertContains(self.client.get(reverse('qr-report')), 'Rekap Absensi')
+		self.assertContains(self.client.get(reverse('qr-report')), 'Rekap absensi')
 		self.assertContains(self.client.get(reverse('qr-cards')), '403')
 		self.assertContains(self.client.get(reverse('qr-devices')), '403')
 		self.client.logout()
 		self.login('staff')
-		self.assertContains(self.client.get(reverse('qr-cards')), 'Kartu QR Pegawai')
+		self.assertContains(self.client.get(reverse('qr-cards')), 'Kartu QR pegawai')
 		self.assertContains(self.client.get(reverse('qr-devices')), '403')
 		self.client.logout()
 		self.login('funsionario')
 		self.assertContains(self.client.get(reverse('qr-report')), '403')
 		self.assertContains(self.client.get(reverse('qr-today')), '403')
-		self.assertContains(self.client.get(reverse('qr-me')), 'Absensi Saya')
+		self.assertContains(self.client.get(reverse('qr-me')), 'Absensi saya')
 
 	def test_me_shows_only_own_rows(self):
 		from employee.models import EmployeeUser
@@ -364,7 +379,7 @@ class ViewTests(QRBase):
 		self.assertNotContains(self.client.get(reverse('qr-devices')), key)
 		self.client.post(reverse('qr-device-toggle', args=[dev.pk]))
 		self.assertFalse(ScanDevice.objects.get().is_active)
-		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY=key).status_code, 401)
+		self.assertIsNone(svc.get_device(key))
 
 	def test_card_print_creates_card_and_renders_qr_that_scans(self):
 		self.login('admin')
@@ -420,3 +435,236 @@ class ViewTests(QRBase):
 	def test_bad_period_falls_back(self):
 		self.login('admin')
 		self.assertEqual(self.client.get(reverse('qr-report'), {'year': 'x', 'month': '99'}).status_code, 200)
+
+
+
+class NetworkTests(QRBase):
+	def post(self, **extra):
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			return self.client.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json', **extra)
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8', '192.168.1.5'])
+	def test_ip_allowlist(self):
+		r = self.post(REMOTE_ADDR='203.0.113.9')
+		self.assertEqual((r.status_code, r.json()['code']), (403, 'net'))
+		self.assertEqual(Attendance.objects.count(), 0)
+		self.assertEqual(self.post(REMOTE_ADDR='10.1.2.3').status_code, 200)
+		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), REMOTE_ADDR='203.0.113.9').status_code, 403)
+		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), REMOTE_ADDR='192.168.1.5').status_code, 200)
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8'])
+	def test_spoofed_forwarded_header_is_ignored_unless_trusted(self):
+		r = self.post(REMOTE_ADDR='203.0.113.9', HTTP_X_FORWARDED_FOR='10.1.1.1')
+		self.assertEqual(r.status_code, 403)
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8'], ATTENDANCE_TRUST_PROXY_HEADER=True)
+	def test_trusted_proxy_uses_rightmost_entry(self):
+		# klien memalsukan 10.1.1.1 di kiri; proxy menambahkan alamat asli (luar kantor) di kanan
+		self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='10.1.1.1, 203.0.113.9').status_code, 403)
+		self.assertEqual(self.post(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR='198.51.100.7, 10.2.2.2').status_code, 200)
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['not-an-ip', '10.0.0.0/8'])
+	def test_bad_config_entries_do_not_open_access(self):
+		self.assertEqual(self.post(REMOTE_ADDR='203.0.113.9').status_code, 403)
+
+	def test_security_banner_for_managers(self):
+		u = User.objects.create_user('m', password='x')
+		u.groups.add(Group.objects.create(name='admin'))
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		self.assertContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
+		with override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8']):
+			self.assertNotContains(self.client.get(reverse('qr-today')), 'ATTENDANCE_KIOSK_ALLOWED_IPS')
+
+
+class I18nTests(QRBase):
+	def login_admin(self):
+		u = User.objects.create_user('adm', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.client.force_login(u)
+
+	def test_every_key_has_four_languages_and_same_placeholders(self):
+		import re
+		from attendance import qr_i18n as i18n
+		ph = lambda text: sorted(re.findall(r'\{(\w+)\}', text))
+		for key, row in i18n.MESSAGES.items():
+			self.assertEqual(len(row), 4, key)
+			for lang, text in zip(i18n.LANGS, row):
+				self.assertTrue(text.strip(), '%s [%s] kosong' % (key, lang))
+			for text in row[1:]:
+				self.assertEqual(ph(text), ph(row[0]), 'placeholder berbeda: ' + key)
+		for lang in i18n.LANGS:
+			self.assertEqual(len(i18n.MONTHS[lang]), 12)
+			self.assertEqual(len(i18n.WEEKDAYS[lang]), 7)
+
+	def test_every_key_used_in_templates_and_code_exists(self):
+		import pathlib, re
+		from attendance import qr_i18n as i18n
+		base = pathlib.Path(__file__).parent
+		prefixes = sorted({k.split('.')[0] for k in i18n.MESSAGES}, key=len, reverse=True)
+		literal = re.compile(r"""['"]((?:%s)(?:\.\w+)+)['"]""" % '|'.join(re.escape(p) for p in prefixes))
+		used = set()
+		for f in (base / 'templates' / 'attendance' / 'qr').glob('*.html'):
+			text = f.read_text(encoding='utf-8')
+			used |= set(re.findall(r"\{%\s*t4?\s+['\"](\w+(?:\.\w+)+)['\"]", text))
+			used |= set(re.findall(r'data-i18n(?:-ph)?="(\w+(?:\.\w+)+)"', text))
+		code = (base / 'views_qr.py').read_text(encoding='utf-8') + (base / 'qr_service.py').read_text(encoding='utf-8')
+		js = (base / 'static' / 'attendance' / 'qr' / 'kiosk.js').read_text(encoding='utf-8')
+		used |= set(literal.findall(code)) | set(literal.findall(js))
+		for name in re.findall(r"_result\([^,]+,\s*'(\w+)'", code):
+			used |= {'res.%s.title' % name, 'res.%s.msg' % name}
+		used |= {'res.%s.%s' % (c, part) for c in ('net', 'device') for part in ('title', 'msg')}
+		self.assertGreater(len(used), 60)             # pastikan regex benar-benar menemukan kunci
+		self.assertEqual(sorted(k for k in used if k not in i18n.MESSAGES), [])
+
+	def test_default_language_is_tetun_and_unknown_is_ignored(self):
+		from attendance import qr_i18n as i18n
+		self.assertEqual(i18n.tr(None, 'nav.today'), 'Ohin')
+		self.assertEqual(i18n.tr('xx', 'nav.today'), 'Ohin')
+		self.assertEqual(i18n.tr('pt', 'nav.today'), 'Hoje')
+		self.assertEqual(i18n.tr('en', 'nope.key'), 'nope.key')
+		self.assertEqual(i18n.tr('en', 'msg.printed', n=3), '3 cards marked as printed.')
+		self.assertEqual(i18n.fmt_date(MON, 'pt'), 'Segunda-feira, 9 Novembro 2026')
+		self.assertEqual(i18n.fmt_date(MON, 'tet'), 'Segunda, 9 Novembru 2026')
+
+	@override_settings(ATTENDANCE_DEFAULT_LANG='en')
+	def test_default_language_configurable(self):
+		self.login_admin()
+		self.assertContains(self.client.get(reverse('qr-today')), 'Attendance today')
+
+	def test_lang_view_sets_cookie_and_redirects(self):
+		url = reverse('qr-lang', args=['pt'])
+		r = self.client.get(url, {'next': '/attendance/qr/today/'})
+		self.assertEqual((r.status_code, r['Location']), (302, '/attendance/qr/today/'))
+		self.assertEqual(r.cookies['mdi_lang'].value, 'pt')
+		self.assertEqual(r.cookies['mdi_lang']['samesite'], 'Lax')
+
+	def test_lang_view_rejects_open_redirect_and_bad_code(self):
+		r = self.client.get(reverse('qr-lang', args=['en']), {'next': 'https://evil.example/x'})
+		self.assertEqual(r['Location'], reverse('qr-kiosk'))
+		r = self.client.get(reverse('qr-lang', args=['zz']), {'next': '/attendance/qr/today/'})
+		self.assertNotIn('mdi_lang', r.cookies)
+
+	def test_admin_pages_render_in_each_language(self):
+		from attendance import qr_i18n as i18n
+		self.login_admin()
+		self.scan(MON, 8)
+		for lang in i18n.LANGS:
+			self.client.cookies['mdi_lang'] = lang
+			for name, key in [('qr-today', 'today.title'), ('qr-report', 'rep.title'), ('qr-cards', 'cards.title'),
+							  ('qr-devices', 'dev.title'), ('qr-me', 'me.title')]:
+				r = self.client.get(reverse(name))
+				self.assertEqual(r.status_code, 200, (lang, name))
+				self.assertContains(r, escape(i18n.tr(lang, key)))
+				self.assertContains(r, 'class="qr-flag')
+			self.assertContains(self.client.get(reverse('qr-report')), i18n.month_name(MON.month, lang))
+
+	def test_flags_are_links_that_mark_current_language(self):
+		self.login_admin()
+		self.client.cookies['mdi_lang'] = 'pt'
+		r = self.client.get(reverse('qr-today'))
+		html = r.content.decode()
+		for code in ('tet', 'en', 'id', 'pt'):
+			self.assertIn('/attendance/qr/lang/%s/?next=' % code, html)
+		self.assertEqual(html.count('qr-flag on'), 1)
+		self.assertIn('qr-flag on" href="/attendance/qr/lang/pt/', html)
+
+	@override_settings(ATTENDANCE_LANG_IN_NAVBAR=True)
+	def test_flags_hidden_in_page_when_navbar_has_them(self):
+		self.login_admin()
+		self.assertNotContains(self.client.get(reverse('qr-today')), 'qr-flags')
+
+	def test_navbar_snippet_renders_flags(self):
+		from django.template.loader import render_to_string
+		from django.test import RequestFactory
+		req = RequestFactory().get('/x/')
+		html = render_to_string('attendance/qr/_navbar_lang.html', {}, request=req)
+		self.assertEqual(html.count('hreflang='), 4)
+		self.assertIn('qr-navbar-lang', html)
+
+	def test_kiosk_has_flags_in_top_bar_and_all_languages(self):
+		import json
+		r = self.client.get(reverse('qr-kiosk'))
+		html = r.content.decode()
+		header = html[html.index('<header'):html.index('</header>')]
+		self.assertEqual(header.count('data-lang='), 4)         # bendera ada di topbar kanan
+		self.assertNotIn('data-lang=', html[html.index('<footer'):html.index('</footer>')])
+		bundle = json.loads(r.context['bundle'] and json.dumps(r.context['bundle']))
+		for lang in ('tet', 'en', 'id', 'pt'):
+			self.assertIn('k.title', bundle[lang])
+			self.assertEqual(len(bundle[lang]['_months']), 12)
+		self.assertContains(r, 'id="i18n"')
+
+	def test_kiosk_initial_language_follows_cookie(self):
+		self.client.cookies['mdi_lang'] = 'pt'
+		r = self.client.get(reverse('qr-kiosk'))
+		self.assertContains(r, '<html lang="pt">')
+		self.assertContains(r, 'ASSIDUIDADE DOS FUNCIONÁRIOS')
+
+	def test_scan_result_language(self):
+		def api(lang):
+			body = {'code': self.payload}
+			if lang:
+				body['lang'] = lang
+			with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+				return self.client.post(reverse('qr-kiosk-scan'), data=body, content_type='application/json').json()
+		self.assertEqual(api('pt')['title'], 'Bem-vindo')
+		Attendance.objects.all().delete()
+		self.assertEqual(api('en')['message'], 'Checked in at 08:00.')
+		Attendance.objects.all().delete()
+		self.assertEqual(api('id')['title'], 'Selamat datang')
+		Attendance.objects.all().delete()
+		self.assertEqual(api('tet')['title'], 'Bem-vindu')
+		Attendance.objects.all().delete()
+		self.assertEqual(api('zz')['title'], 'Bem-vindu')       # bahasa tak dikenal -> bawaan (Tetun)
+		Attendance.objects.all().delete()
+		self.assertEqual(api(None)['title'], 'Bem-vindu')
+
+	def test_rejection_messages_are_translated(self):
+		NacionalHoliday.objects.create(name='', date=MON)
+		self.assertIn('National holiday', svc.process_scan(self.payload, now=at(MON, 8), lang='en')['message'])
+		self.assertIn('Feriado nacional', svc.process_scan(self.payload, now=at(MON, 8), lang='pt')['message'])
+		self.assertIn('Libur nasional', svc.process_scan(self.payload, now=at(MON, 8), lang='id')['message'])
+		self.assertIn('Feriadu nasionál', svc.process_scan(self.payload, now=at(MON, 8), lang='tet')['message'])
+		self.assertIn('Weekend', svc.process_scan(self.payload, now=at(SUN, 8), lang='en')['message'])
+		self.assertEqual(svc.process_scan('x', now=at(MON, 8), lang='pt')['title'], 'QR desconhecido')
+
+	def test_today_log_shows_translated_result_label(self):
+		self.login_admin()
+		self.client.cookies['mdi_lang'] = 'pt'
+		self.scan(SUN, 8)
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 12)):
+			r = self.client.get(reverse('qr-today'))
+		self.assertContains(r, 'Dia de folga')
+
+	def test_leave_message_default_kind_translated(self):
+		Leaves.objects.create(employee=self.emp, start_date=MON, end_date=MON, is_active=True, is_confirm=True)
+		self.assertIn('Licença', svc.process_scan(self.payload, now=at(MON, 8), lang='pt')['message'])
+
+	def test_card_print_has_all_four_languages_switchable(self):
+		self.login_admin()
+		self.client.cookies['mdi_lang'] = 'en'
+		r = self.client.post(reverse('qr-card-print'), {'ids': [self.emp.pk]})
+		html = r.content.decode()
+		for code in ('tet', 'en', 'id', 'pt'):
+			self.assertIn('data-l="%s"' % code, html)
+			self.assertIn('data-lang="%s"' % code, html)       # bendera di toolbar
+		self.assertIn('<span data-l="en">EMPLOYEE CARD</span>', html)
+		self.assertIn('<span data-l="pt" hidden>CARTÃO DE FUNCIONÁRIO</span>', html)
+		self.assertIn('KARTAUN FUNSIONÁRIU', html)
+		self.assertIn('Scan saat masuk &amp; pulang', html)
+
+	@override_settings(ATTENDANCE_CARD_BACK_NOTE={'en': 'English note', 'pt': 'Nota PT'}, ATTENDANCE_CARD_CONTACT='Tel 123')
+	def test_card_note_and_contact_can_be_customised_per_language(self):
+		self.login_admin()
+		html = self.client.post(reverse('qr-card-print'), {'ids': [self.emp.pk]}).content.decode()
+		self.assertIn('Nota PT', html)
+		self.assertIn('English note', html)
+		self.assertEqual(html.count('Tel 123'), 4)
+
+	def test_csv_headers_follow_language(self):
+		self.login_admin()
+		self.client.cookies['mdi_lang'] = 'en'
+		text = self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).content.decode('utf-8-sig')
+		self.assertTrue(text.startswith('NRF,Name,Position,Division,1,2'))
+		self.assertIn('Work days,Present,Late,Leave,Absent', text)
