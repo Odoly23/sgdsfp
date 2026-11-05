@@ -1,0 +1,10 @@
+{% load static %}
+<link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
+<div class="qr-nav">
+	{% if can_view %}<a href="{% url 'qr-today' %}" class="{% if active == 'today' %}on{% endif %}">Hari ini</a>{% endif %}
+	{% if can_view %}<a href="{% url 'qr-report' %}" class="{% if active == 'report' %}on{% endif %}">Rekap bulanan</a>{% endif %}
+	{% if can_manage %}<a href="{% url 'qr-cards' %}" class="{% if active == 'cards' %}on{% endif %}">Kartu QR</a>{% endif %}
+	{% if can_device %}<a href="{% url 'qr-devices' %}" class="{% if active == 'devices' %}on{% endif %}">Perangkat kiosk</a>{% endif %}
+	<a href="{% url 'qr-me' %}" class="{% if active == 'me' %}on{% endif %}">Absensi saya</a>
+	<a href="{% url 'qr-kiosk' %}" target="_blank" rel="noopener">Buka layar kiosk ↗</a>
+</div>

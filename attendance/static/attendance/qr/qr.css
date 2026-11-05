@@ -1,0 +1,158 @@
+/* Absensi QR — warna mengikuti logo MDI (merah + abu perak). Ganti warna cukup di :root. */
+:root {
+	--mdi-red: #e3171e;
+	--mdi-red-dk: #a80f14;
+	--mdi-silver: #b8b4aa;
+	--mdi-bg: #f4f2ee;
+	--mdi-brown: #8a6a4f;
+	--mdi-ink: #26231f;
+	--mdi-mute: #6f6a62;
+	--st-ok: #1f9d55;
+	--st-warn: #d98e04;
+	--st-leave: #2563eb;
+	--st-absent: #8b1a1a;
+	--st-off: #9a968d;
+}
+
+/* ---------- halaman admin ---------- */
+.qr-page { color: var(--mdi-ink); padding: 18px 4px 40px; }
+.qr-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.qr-head h1 { font-size: 1.5rem; font-weight: 700; margin: 0; }
+.qr-head h1::before { content: ""; display: inline-block; width: 6px; height: 1.1em; background: var(--mdi-red); border-radius: 3px; margin-right: 10px; vertical-align: -0.18em; }
+.qr-sub { color: var(--mdi-mute); font-size: .92rem; margin: 2px 0 0; }
+.qr-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.qr-nav a { padding: 8px 14px; border-radius: 999px; background: #fff; border: 1px solid #ddd8cf; color: var(--mdi-ink); font-size: .9rem; text-decoration: none; }
+.qr-nav a:hover { border-color: var(--mdi-red); color: var(--mdi-red-dk); text-decoration: none; }
+.qr-nav a.on { background: var(--mdi-red); border-color: var(--mdi-red); color: #fff; }
+
+.qr-card { background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.05); margin-bottom: 18px; }
+.qr-card h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px; }
+
+.qr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.qr-tile { background: #fff; border: 1px solid #e6e1d8; border-radius: 14px; padding: 14px 16px; border-top: 4px solid var(--mdi-silver); }
+.qr-tile b { display: block; font-size: 1.9rem; line-height: 1.1; }
+.qr-tile span { color: var(--mdi-mute); font-size: .85rem; }
+.qr-tile.ok { border-top-color: var(--st-ok); }
+.qr-tile.warn { border-top-color: var(--st-warn); }
+.qr-tile.leave { border-top-color: var(--st-leave); }
+.qr-tile.wait { border-top-color: var(--mdi-silver); }
+
+.qr-banner { padding: 12px 16px; border-radius: 12px; background: #fff4e5; border: 1px solid #f3d29b; margin-bottom: 18px; }
+
+.qr-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
+.qr-filter label { display: block; font-size: .78rem; color: var(--mdi-mute); margin: 0 0 3px; }
+.qr-filter select, .qr-filter input[type=text] { min-width: 150px; padding: 8px 10px; border: 1px solid #d6d1c7; border-radius: 8px; background: #fff; }
+
+.qr-btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--mdi-red); background: var(--mdi-red); color: #fff; font-size: .9rem; cursor: pointer; text-decoration: none; }
+.qr-btn:hover { background: var(--mdi-red-dk); border-color: var(--mdi-red-dk); color: #fff; text-decoration: none; }
+.qr-btn.ghost { background: #fff; color: var(--mdi-red-dk); }
+.qr-btn.ghost:hover { background: #fdecec; color: var(--mdi-red-dk); }
+.qr-btn.sm { padding: 4px 10px; font-size: .8rem; }
+
+.qr-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.qr-table th { text-align: left; color: var(--mdi-mute); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; padding: 8px 10px; border-bottom: 2px solid #e6e1d8; }
+.qr-table td { padding: 9px 10px; border-bottom: 1px solid #eee9e0; vertical-align: middle; }
+.qr-table tr:hover td { background: #faf8f4; }
+.qr-scroll { overflow-x: auto; }
+
+.qr-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 600; background: #eee9e0; color: var(--mdi-ink); }
+.qr-chip.ok { background: #dff3e7; color: #146c3b; }
+.qr-chip.warn { background: #fdf0d2; color: #8a5a00; }
+.qr-chip.err { background: #f8dcdc; color: var(--mdi-red-dk); }
+.qr-chip.leave { background: #dce8fd; color: #1d4ed8; }
+
+.qr-key { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.05rem; padding: 12px 14px; background: #fff8e1; border: 2px dashed var(--st-warn); border-radius: 10px; word-break: break-all; user-select: all; }
+
+/* ---------- rekap ---------- */
+.rp-table { border-collapse: separate; border-spacing: 0; font-size: .78rem; }
+.rp-table th, .rp-table td { padding: 4px 5px; border-bottom: 1px solid #eee9e0; text-align: center; white-space: nowrap; }
+.rp-table th { background: #faf8f4; position: sticky; top: 0; z-index: 2; font-weight: 600; }
+.rp-table td.rp-name, .rp-table th.rp-name { position: sticky; left: 0; background: #fff; text-align: left; min-width: 190px; z-index: 1; border-right: 2px solid #e6e1d8; }
+.rp-table th.rp-name { background: #faf8f4; z-index: 3; }
+.rp-name small { display: block; color: var(--mdi-mute); }
+.rp-c { min-width: 24px; border-radius: 4px; font-weight: 700; }
+.rp-P { background: #dff3e7; color: #146c3b; }
+.rp-P.late { background: #fdf0d2; color: #8a5a00; }
+.rp-L { background: #dce8fd; color: #1d4ed8; }
+.rp-F { background: #f6d6d6; color: var(--st-absent); }
+.rp-W, .rp-H { background: #ebe8e1; color: var(--st-off); }
+.rp-flag { font-size: .62rem; display: block; line-height: 1; margin-top: 2px; color: var(--mdi-red-dk); }
+.rp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--mdi-mute); margin: 10px 0 14px; }
+.rp-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+
+/* ---------- kiosk ---------- */
+body.kiosk { margin: 0; min-height: 100vh; background: var(--mdi-bg); color: var(--mdi-ink); font-family: 'Segoe UI', Tahoma, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+.k-top { background: #fff; border-bottom: 4px solid var(--mdi-red); display: flex; align-items: center; justify-content: space-between; padding: 10px 28px; }
+.k-top img { height: 64px; }
+.k-top h1 { margin: 0; font-size: 1.6rem; letter-spacing: .04em; color: var(--mdi-red-dk); }
+.k-top small { color: var(--mdi-mute); display: block; }
+.k-main { flex: 1; display: grid; grid-template-columns: 1fr 1.25fr; gap: 28px; padding: 28px; }
+@media (max-width: 900px) { .k-main { grid-template-columns: 1fr; } }
+.k-clock { background: #fff; border-radius: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.06); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+.k-time { font-size: clamp(3.5rem, 9vw, 7rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--mdi-red-dk); }
+.k-date { font-size: 1.4rem; margin-top: 10px; color: var(--mdi-mute); }
+.k-hint { margin-top: 28px; font-size: 1.25rem; padding: 14px 22px; border: 2px dashed var(--mdi-silver); border-radius: 14px; }
+.k-rules { margin-top: 14px; color: var(--mdi-mute); font-size: .95rem; }
+
+.k-result { border-radius: 22px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.06); display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; transition: background .2s; }
+.k-idle { color: var(--mdi-silver); font-size: 1.6rem; }
+.k-idle svg { width: 120px; height: 120px; display: block; margin: 0 auto 12px; }
+.k-card { width: 100%; }
+.k-photo { width: 170px; height: 210px; object-fit: cover; border-radius: 14px; border: 4px solid rgba(255,255,255,.7); background: #ddd; margin-bottom: 14px; }
+.k-title { font-size: clamp(1.8rem, 3.6vw, 3rem); font-weight: 700; line-height: 1.1; }
+.k-name { font-size: clamp(1.5rem, 3vw, 2.4rem); margin-top: 8px; font-weight: 600; }
+.k-meta { font-size: 1.15rem; opacity: .9; margin-top: 4px; }
+.k-msg { font-size: 1.4rem; margin-top: 14px; }
+.k-result.success { background: var(--st-ok); color: #fff; }
+.k-result.warn { background: var(--st-warn); color: #fff; }
+.k-result.leave { background: var(--st-leave); color: #fff; }
+.k-result.info { background: var(--mdi-silver); color: #26231f; }
+.k-result.error { background: var(--mdi-red-dk); color: #fff; }
+
+.k-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 28px; font-size: .85rem; color: var(--mdi-mute); }
+.k-foot button, .k-setup button { cursor: pointer; border: 1px solid var(--mdi-silver); background: #fff; border-radius: 8px; padding: 6px 12px; }
+#scan-input { position: absolute; left: -9999px; opacity: 0; }
+.k-cam { position: fixed; right: 20px; bottom: 56px; width: 240px; border-radius: 12px; border: 3px solid var(--mdi-red); display: none; background: #000; z-index: 20; }
+.k-setup { position: fixed; inset: 0; background: rgba(38,35,31,.82); display: none; align-items: center; justify-content: center; z-index: 50; }
+.k-setup.on { display: flex; }
+.k-setup form { background: #fff; padding: 28px; border-radius: 18px; width: min(440px, 92vw); }
+.k-setup h2 { margin-top: 0; color: var(--mdi-red-dk); }
+.k-setup input { width: 100%; padding: 12px; font-size: 1.1rem; border: 2px solid var(--mdi-silver); border-radius: 10px; margin: 10px 0; box-sizing: border-box; }
+.k-setup .k-err { color: var(--mdi-red-dk); min-height: 1.3em; }
+.k-setup .go { background: var(--mdi-red); color: #fff; border-color: var(--mdi-red); width: 100%; padding: 12px; font-size: 1.05rem; }
+
+/* ---------- kartu member (CR80 85,6 x 54 mm, lanskap) ---------- */
+body.cardsheet { margin: 0; background: #e9e6df; font-family: 'Segoe UI', Tahoma, sans-serif; }
+.cs-bar { position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 3px solid var(--mdi-red); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.cs-bar label { margin: 0 6px 0 0; }
+.cs-foot { display: flex; gap: 12px; justify-content: center; align-items: center; padding: 16px; }
+.cs-wrap { display: flex; flex-wrap: wrap; gap: 14px; padding: 16px; justify-content: center; }
+.mdi-card { position: relative; width: 85.6mm; height: 54mm; background: #fff; overflow: hidden; box-sizing: border-box; border-radius: 3mm; box-shadow: 0 1px 6px rgba(0,0,0,.25); color: #26231f; }
+.mdi-card .stripe { position: absolute; left: 0; right: 0; bottom: 0; height: 7mm; background: var(--mdi-red); color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 4mm; font-size: 2.6mm; font-weight: 700; letter-spacing: .25mm; }
+.mdi-card .band { position: absolute; left: 0; right: 0; top: 0; height: 13mm; background: linear-gradient(90deg, #fff 0, #f1efea 100%); border-bottom: .5mm solid var(--mdi-silver); display: flex; align-items: center; padding: 0 3.5mm; gap: 2.5mm; }
+.mdi-card .band img { height: 10.5mm; }
+.mdi-card .band b { display: block; color: var(--mdi-red-dk); font-size: 3.4mm; line-height: 1.1; }
+.mdi-card .band small { display: block; color: var(--mdi-brown); font-size: 2.2mm; letter-spacing: .2mm; }
+.mdi-card .photo { position: absolute; left: 4mm; top: 15.5mm; width: 21mm; height: 27mm; object-fit: cover; border: .4mm solid var(--mdi-silver); border-radius: 1.2mm; background: #eee; }
+.mdi-card .info { position: absolute; left: 29mm; right: 3.5mm; top: 15.5mm; }
+.mdi-card .info .nm { font-size: 4.1mm; font-weight: 700; color: var(--mdi-red-dk); line-height: 1.12; max-height: 9.6mm; overflow: hidden; }
+.mdi-card .info .ps { font-size: 3mm; margin-top: 1.2mm; font-weight: 600; }
+.mdi-card .info .un { font-size: 2.6mm; color: var(--mdi-mute); margin-top: .6mm; }
+.mdi-card .info .no { font-size: 2.8mm; margin-top: 2.4mm; }
+.mdi-card .info .no span { color: var(--mdi-mute); }
+.mdi-card.back .txt { position: absolute; left: 4mm; top: 4mm; width: 44mm; font-size: 2.45mm; line-height: 1.38; }
+.mdi-card.back .txt b { display: block; color: var(--mdi-red-dk); font-size: 3mm; margin-bottom: 1.2mm; }
+.mdi-card.back .txt .ct { margin-top: 1.6mm; font-weight: 600; }
+.mdi-card.back .qrbox { position: absolute; right: 5mm; top: 5mm; width: 31mm; height: 31mm; padding: 1.4mm; background: #fff; border: .4mm solid var(--mdi-silver); border-radius: 1.6mm; box-sizing: border-box; }
+.mdi-card.back .qrbox svg { width: 100% !important; height: 100% !important; display: block; }
+.mdi-card.back .qrcap { position: absolute; right: 5mm; top: 37mm; width: 31mm; text-align: center; font-size: 2.1mm; color: var(--mdi-mute); }
+body.only-front .mdi-card.back { display: none; }
+body.only-back .mdi-card.front { display: none; }
+
+@media print {
+	@page { size: 85.6mm 54mm; margin: 0; }
+	body.cardsheet { background: #fff; }
+	.cs-bar, .cs-foot { display: none; }
+	.cs-wrap { display: block; padding: 0; }
+	.mdi-card { box-shadow: none; border-radius: 0; page-break-after: always; break-after: page; margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

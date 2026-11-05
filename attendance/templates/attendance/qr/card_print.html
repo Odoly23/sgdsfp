@@ -1,0 +1,53 @@
+{% load static %}<!DOCTYPE html>
+<html lang="id">
+<head>
+	<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Cetak Kartu MDI</title>
+	<link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
+</head>
+<body class="cardsheet">
+	<div class="cs-bar">
+		<b>{{ items|length }} kartu</b>
+		<span>
+			<label><input type="radio" name="side" value="both" checked> Depan + belakang</label>
+			<label><input type="radio" name="side" value="front"> Depan saja</label>
+			<label><input type="radio" name="side" value="back"> Belakang saja</label>
+		</span>
+		<button onclick="window.print()" style="padding:8px 16px;border:0;border-radius:8px;background:#e3171e;color:#fff;cursor:pointer">Cetak</button>
+		<span style="color:#6f6a62;font-size:.85rem">Atur kertas: ukuran 85,6 × 54 mm, tanpa margin, skala 100%. Untuk printer dua sisi, pilih "Depan + belakang".</span>
+	</div>
+	<div class="cs-wrap">
+	{% for c in items %}
+		<div class="mdi-card front">
+			<div class="band"><img src="{% static 'attendance/qr/mdi-logo.jpg' %}" alt=""><div><b>MATA DALAN INSTITUTE</b><small>KARTU PEGAWAI</small></div></div>
+			{% if c.photo %}<img class="photo" src="{{ c.photo }}" alt="">{% else %}<div class="photo"></div>{% endif %}
+			<div class="info">
+				<div class="nm">{{ c.name }}</div>
+				<div class="ps">{{ c.position|default:"-" }}</div>
+				<div class="un">{{ c.division }}</div>
+				<div class="no"><span>No.</span> {{ c.number }}</div>
+				{% if c.expiry %}<div class="no"><span>Berlaku s/d</span> {{ c.expiry|date:"d/m/Y" }}</div>{% endif %}
+			</div>
+			<div class="stripe"><span>M D I</span><span>{{ c.name|truncatechars:26 }}</span></div>
+		</div>
+		<div class="mdi-card back">
+			<div class="txt"><b>Kartu Absensi</b>{{ note }}{% if contact %}<div class="ct">{{ contact }}</div>{% endif %}</div>
+			<div class="qrbox">{{ c.qr }}</div>
+			<div class="qrcap">Scan saat masuk &amp; pulang</div>
+			<div class="stripe"><span>MATA DALAN INSTITUTE</span><span>{{ c.number }}</span></div>
+		</div>
+	{% empty %}<p style="padding:24px">Tidak ada kartu aktif untuk dicetak.</p>
+	{% endfor %}
+	</div>
+	<form method="post" action="{% url 'qr-card-action' %}" class="cs-foot">
+		{% csrf_token %}{% for i in ids %}<input type="hidden" name="ids" value="{{ i }}">{% endfor %}
+		<input type="hidden" name="action" value="printed">
+		<span>Sudah selesai mencetak?</span> <button type="submit" style="padding:8px 16px;border-radius:8px;border:1px solid #e3171e;background:#fff;color:#a80f14;cursor:pointer">Tandai sudah dicetak</button>
+	</form>
+	<script>
+		document.querySelectorAll('input[name=side]').forEach(function (r) {
+			r.addEventListener('change', function () { document.body.className = 'cardsheet' + (r.value === 'both' ? '' : ' only-' + r.value); });
+		});
+	</script>
+</body>
+</html>

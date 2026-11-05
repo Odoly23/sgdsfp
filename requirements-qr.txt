@@ -1,0 +1,2 @@
+qrcode>=7.4   # QR dalam bentuk SVG (tidak butuh Pillow)
+openpyxl>=3.1  # opsional: unduh rekap .xlsx (CSV tetap jalan tanpa ini)

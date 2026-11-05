@@ -1,0 +1,20 @@
+{% extends 'main/layout.html' %}
+{% block content %}
+{% include 'attendance/qr/_nav.html' with active='report' %}
+<div class="qr-page">
+	<div class="qr-head"><div><h1>Rekap Absensi</h1>
+		<p class="qr-sub">{{ monthname }} {{ year }}{% if div %} · {{ div.name }}{% else %} · semua divisi{% endif %}</p></div>
+		<div>
+			<a class="qr-btn ghost" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">Unduh CSV</a>
+			<a class="qr-btn" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">Unduh Excel</a>
+		</div></div>
+	<form method="get" class="qr-filter qr-card">
+		<div><label>Divisi</label><select name="div"><option value="">Semua divisi</option>
+			{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
+		<div><label>Bulan</label><select name="month">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+		<div><label>Tahun</label><select name="year">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></div>
+		<button class="qr-btn" type="submit">Tampilkan</button>
+	</form>
+	<div class="qr-card">{% include 'attendance/qr/_grid.html' with rows=rep.rows %}</div>
+</div>
+{% endblock %}

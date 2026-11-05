@@ -1,0 +1,41 @@
+{% extends 'main/layout.html' %}
+{% block content %}
+{% include 'attendance/qr/_nav.html' with active='cards' %}
+<div class="qr-page">
+	<div class="qr-head"><div><h1>Kartu QR Pegawai</h1>
+		<p class="qr-sub">Pilih pegawai, klik "Cetak kartu terpilih", cetak depan dan belakang, lalu tandai sudah dicetak.</p></div></div>
+	<form method="get" class="qr-filter qr-card">
+		<div><label>Divisi</label><select name="div"><option value="">Semua divisi</option>
+			{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
+		<div><label>Cari nama atau NRF</label><input type="text" name="q" value="{{ q }}"></div>
+		<button class="qr-btn" type="submit">Tampilkan</button>
+	</form>
+	{% if limited %}<div class="qr-banner">Hanya 500 pegawai pertama yang ditampilkan. Persempit dengan filter divisi.</div>{% endif %}
+	<form method="post" id="cardform">{% csrf_token %}
+	<div class="qr-card">
+		<div class="qr-filter">
+			<button class="qr-btn" type="submit" formaction="{% url 'qr-card-print' %}" formtarget="_blank">Cetak kartu terpilih</button>
+			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="printed">Tandai sudah dicetak</button>
+			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="regen"
+				onclick="return confirm('Buat QR baru untuk pegawai terpilih? Kartu lama langsung tidak berlaku.')">Ganti QR (kartu hilang)</button>
+			<button class="qr-btn ghost" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="toggle">Aktif/nonaktifkan</button>
+		</div>
+		<div class="qr-scroll"><table class="qr-table">
+			<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
+				<th>Nama</th><th>NRF</th><th>Jabatan</th><th>Divisi</th><th>Kartu QR</th></tr></thead>
+			<tbody>
+			{% for p in people %}
+				<tr><td><input class="ck" type="checkbox" name="ids" value="{{ p.id }}"></td>
+					<td>{{ p.name }}</td><td>{{ p.nrf|default:"-" }}</td><td>{{ p.position|default:"-" }}</td><td>{{ p.division|default:"-" }}</td>
+					<td>{% if not p.qr %}<span class="qr-chip">Belum dibuat</span>
+						{% elif not p.qr.is_active %}<span class="qr-chip err">Nonaktif</span>
+						{% elif p.printed %}<span class="qr-chip ok">Sudah dicetak</span>
+						{% else %}<span class="qr-chip warn">Belum dicetak</span>{% endif %}</td></tr>
+			{% empty %}<tr><td colspan="6" class="qr-sub">Tidak ada pegawai.</td></tr>
+			{% endfor %}
+			</tbody>
+		</table></div>
+	</div>
+	</form>
+</div>
+{% endblock %}

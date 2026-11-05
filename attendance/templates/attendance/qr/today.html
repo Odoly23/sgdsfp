@@ -1,0 +1,51 @@
+{% extends 'main/layout.html' %}
+{% block content %}
+{% include 'attendance/qr/_nav.html' with active='today' %}
+<div class="qr-page">
+	<div class="qr-head">
+		<div><h1>Absensi Hari Ini</h1><p class="qr-sub">{{ date|date:"l, d F Y" }} · halaman ini menyegarkan diri tiap 30 detik</p></div>
+	</div>
+	{% if off_reason %}<div class="qr-banner"><b>Hari ini bukan hari kerja:</b> {{ off_reason }}. Scan akan ditolak.</div>{% endif %}
+	<div class="qr-tiles">
+		<div class="qr-tile ok"><b>{{ stats.scanned }}</b><span>Sudah scan</span></div>
+		<div class="qr-tile warn"><b>{{ stats.late }}</b><span>Terlambat</span></div>
+		<div class="qr-tile leave"><b>{{ stats.leave }}</b><span>Cuti</span></div>
+		<div class="qr-tile wait"><b>{{ stats.waiting }}</b><span>Belum scan</span></div>
+		<div class="qr-tile"><b>{{ stats.total }}</b><span>Pegawai aktif</span></div>
+	</div>
+	<div class="qr-card">
+		<h2>Sudah scan hari ini</h2>
+		<div class="qr-scroll"><table class="qr-table">
+			<thead><tr><th>Nama</th><th>Divisi</th><th>Masuk</th><th>Pulang</th><th>Keterangan</th></tr></thead>
+			<tbody>
+			{% for it in items %}
+				<tr>
+					<td>{{ it.att.employee }}</td><td>{{ it.att.div.name|default:"-" }}</td>
+					<td>{{ it.in }}</td><td>{{ it.out|default:"-" }}</td>
+					<td>
+						{% if it.att.scantime.is_late %}<span class="qr-chip warn">Terlambat</span>{% else %}<span class="qr-chip ok">Tepat waktu</span>{% endif %}
+						{% if it.early %}<span class="qr-chip warn">Pulang awal</span>{% endif %}
+					</td>
+				</tr>
+			{% empty %}<tr><td colspan="5" class="qr-sub">Belum ada scan.</td></tr>
+			{% endfor %}
+			</tbody>
+		</table></div>
+	</div>
+	<div class="qr-card">
+		<h2>Scan yang ditolak atau diabaikan (terbaru)</h2>
+		<div class="qr-scroll"><table class="qr-table">
+			<thead><tr><th>Jam</th><th>Pegawai</th><th>Hasil</th><th>Pesan</th><th>Perangkat</th></tr></thead>
+			<tbody>
+			{% for l in logs %}
+				<tr><td>{{ l.local }}</td><td>{{ l.employee|default:"(QR tidak dikenal)" }}</td>
+					<td><span class="qr-chip {% if l.code == 'duplicate' or l.code == 'already_in' %}{% else %}err{% endif %}">{{ l.code }}</span></td>
+					<td>{{ l.message }}</td><td>{{ l.device|default:"-" }}</td></tr>
+			{% empty %}<tr><td colspan="5" class="qr-sub">Tidak ada.</td></tr>
+			{% endfor %}
+			</tbody>
+		</table></div>
+	</div>
+</div>
+{% endblock %}
+{% block scripts %}<script>setTimeout(function(){ location.reload(); }, 30000);</script>{% endblock %}
