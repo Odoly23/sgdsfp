@@ -8,7 +8,7 @@
 	<form method="get" class="form-inline mb-3 justify-content-center">
 		<select name="month" class="form-control form-control-sm mr-2" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
 		<select name="year" class="form-control form-control-sm mr-2" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
-		<button class="btn btn-sm btn-info" type="submit">{% t 'f.show' %}</button>
+		<button class="btn btn-sm btn-mdi" type="submit">{% t 'f.show' %}</button>
 	</form>
 	{% if row %}
 	<div class="row text-center mb-3">

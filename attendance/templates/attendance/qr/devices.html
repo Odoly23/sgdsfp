@@ -13,7 +13,7 @@
 <form method="post" action="{% url 'qr-device-add' %}" class="form-inline mb-4">{% csrf_token %}
 	<label class="mr-2" for="dev-name">{% t 'dev.name_label' %}</label>
 	<input id="dev-name" class="form-control form-control-sm mr-2" type="text" name="name" placeholder="{% t 'dev.name_ph' %}" required>
-	<button class="btn btn-sm btn-info" type="submit">{% t 'dev.make' %}</button>
+	<button class="btn btn-sm btn-mdi" type="submit">{% t 'dev.make' %}</button>
 </form>
 <h5>{% t 'dev.list_title' %}</h5>
 <table class="table table-sm table-striped">
@@ -24,7 +24,7 @@
 			<td>{% if d.is_active %}<span class="badge badge-success">{% t 'st.active' %}</span>{% else %}<span class="badge badge-danger">{% t 'st.inactive' %}</span>{% endif %}</td>
 			<td>{% if d.last_seen %}{{ d.last_seen|date:"d/m/Y H:i" }}{% else %}{% t 'dev.never' %}{% endif %}</td>
 			<td><form method="post" action="{% url 'qr-device-toggle' d.pk %}">{% csrf_token %}
-				<button class="btn btn-sm btn-info" type="submit">{% if d.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td></tr>
+				<button class="btn btn-sm btn-mdi" type="submit">{% if d.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td></tr>
 	{% empty %}<tr><td colspan="4" class="text-center text-muted">{% t 'dev.empty' %}</td></tr>
 	{% endfor %}
 	</tbody>

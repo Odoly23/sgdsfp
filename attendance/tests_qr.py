@@ -526,16 +526,18 @@ class I18nTests(QRBase):
 	def test_pages_follow_old_attendance_page_structure(self):
 		self.login_admin()
 		html = self.client.get(reverse('qr-today')).content.decode()
-		for marker in ['breadcrumb-holder', 'card shadow-lg pt-1 border-primary rounded', 'card-header', 'btn btn-sm btn-info',
+		for marker in ['breadcrumb-holder', 'card shadow-lg pt-1 qr-border rounded', 'card-header', 'btn btn-sm btn-mdi',
 					   'table table-sm table-striped', reverse('attendance-dash')]:
 			self.assertIn(marker, html)
+		self.assertNotIn('btn-info', html)               # tombol memakai merah MDI, bukan teal
 
 	def test_dash_button_snippet(self):
 		from django.template.loader import render_to_string
 		html = render_to_string('attendance/qr/_dash_button.html', {}, request=__import__('django.test', fromlist=['x']).RequestFactory().get('/'))
 		self.assertIn(reverse('qr-today'), html)
-		self.assertIn('btn btn-sm btn-info', html)
+		self.assertIn('btn btn-sm btn-mdi', html)
 		self.assertIn('Absensia QR', html)
+		self.assertIn('#e3171e', html)                   # tetap merah walau qr.css belum dimuat halaman itu
 
 	def test_every_key_used_in_templates_and_code_exists(self):
 		import pathlib, re

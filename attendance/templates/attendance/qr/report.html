@@ -8,9 +8,9 @@
 		{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>
 	<select name="month" class="form-control form-control-sm mr-2" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
 	<select name="year" class="form-control form-control-sm mr-2" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
-	<button class="btn btn-sm btn-info mr-2" type="submit">{% t 'f.show' %}</button>
-	<a class="btn btn-sm btn-info mr-1" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">{% t 'btn.csv' %} <i class="fa fa-download"></i></a>
-	<a class="btn btn-sm btn-info" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">{% t 'btn.xlsx' %} <i class="fa fa-file-excel-o"></i></a>
+	<button class="btn btn-sm btn-mdi mr-2" type="submit">{% t 'f.show' %}</button>
+	<a class="btn btn-sm btn-mdi mr-1" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">{% t 'btn.csv' %} <i class="fa fa-download"></i></a>
+	<a class="btn btn-sm btn-mdi" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">{% t 'btn.xlsx' %} <i class="fa fa-file-excel-o"></i></a>
 </form>
 {% include 'attendance/qr/_grid.html' with rows=rep.rows %}
 {% endblock %}

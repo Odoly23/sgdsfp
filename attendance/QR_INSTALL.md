@@ -1,4 +1,4 @@
-# Absensi QR — pemasangan di `mci_hrms`
+# Absensi QR — pemasangan di `mdihrms`
 
 File baru ini hanya **menambah** app `attendance`. View, URL, dan template lama tidak diubah.
 Absensi manual per divisi tetap berjalan, dan baris yang dibuat scan muncul di daftar yang sama.
@@ -81,12 +81,13 @@ Jika server di belakang Nginx/proxy, set `ATTENDANCE_TRUST_PROXY_HEADER = True`;
 ## 4. Pintu masuk, menu, dan bendera bahasa
 
 Halaman QR memakai kerangka yang sama dengan halaman absensia lama (breadcrumb "PAINEL ABSENSIA / ...", kartu
-berbayang, tombol `btn-info`, tabel `table-striped`). Breadcrumb menaut ke `attendance-dash`.
+berbayang, tabel `table-striped`), tetapi tombol dan garis kartunya **merah MDI** (`btn-mdi`, `#e3171e`), bukan teal.
+Breadcrumb menaut ke `attendance-dash`. Ganti warna di `:root` pada `qr.css` (`--mdi-red`, `--mdi-red-dk`).
 
 **Tombol di Painel Absensia** (`attendance/dash.html`): tempel satu baris di samping tombol Relatoriu Absensia
 dan Konfigurasaun:
 ```html
-<a class="btn btn-sm btn-info" href="{% url 'attendance-div-list' ... %}">...</a>   <!-- yang sudah ada -->
+<a class="btn btn-sm btn-info" href="{% url 'attendance-custom-dash' %}">Konfigurasaun</a>   <!-- yang sudah ada -->
 {% include 'attendance/qr/_dash_button.html' %}                                      <!-- baru: tombol "Absensia QR" -->
 ```
 Tombol itu membuka **Hari ini**; dari sana ada tombol ke Rekap, Kartu QR, dan Perangkat kiosk. Tombolnya ikut 4 bahasa.

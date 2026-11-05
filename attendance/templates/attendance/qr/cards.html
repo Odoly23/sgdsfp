@@ -7,16 +7,16 @@
 	<select id="f-div" name="div" class="form-control form-control-sm mr-3"><option value="">{% t 'f.all_div' %}</option>
 		{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>
 	<input type="text" name="q" value="{{ q }}" class="form-control form-control-sm mr-2" placeholder="{% t 'f.search' %}">
-	<button class="btn btn-sm btn-info" type="submit">{% t 'f.show' %}</button>
+	<button class="btn btn-sm btn-mdi" type="submit">{% t 'f.show' %}</button>
 </form>
 {% if limited %}<div class="alert alert-warning p-2">{% t 'cards.limit' %}</div>{% endif %}
 <form method="post" id="cardform">{% csrf_token %}
 	<div class="mb-2">
-		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-print' %}" formtarget="_blank">{% t 'btn.print' %} <i class="fa fa-print"></i></button>
-		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="printed">{% t 'btn.printed' %}</button>
-		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="regen"
+		<button class="btn btn-sm btn-mdi" type="submit" formaction="{% url 'qr-card-print' %}" formtarget="_blank">{% t 'btn.print' %} <i class="fa fa-print"></i></button>
+		<button class="btn btn-sm btn-mdi" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="printed">{% t 'btn.printed' %}</button>
+		<button class="btn btn-sm btn-mdi" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="regen"
 			onclick="return confirm('{% t 'regen.confirm' %}')">{% t 'btn.regen' %}</button>
-		<button class="btn btn-sm btn-info" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="toggle">{% t 'btn.toggle' %}</button>
+		<button class="btn btn-sm btn-mdi" type="submit" formaction="{% url 'qr-card-action' %}" name="action" value="toggle">{% t 'btn.toggle' %}</button>
 	</div>
 	<div class="table-responsive">
 	<table class="table table-sm table-striped">

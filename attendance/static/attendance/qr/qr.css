@@ -23,6 +23,12 @@
 .qr-flag.on { border-color: var(--mdi-red); background: #fff; color: var(--mdi-red-dk); }
 
 /* ---------- halaman admin: kerangka Bootstrap sama seperti halaman absensia lama ---------- */
+/* tombol dan aksen merah MDI (menggantikan btn-info teal) */
+.btn-mdi { color: #fff; background: var(--mdi-red); border-color: var(--mdi-red); }
+.btn-mdi:hover { color: #fff; background: var(--mdi-red-dk); border-color: var(--mdi-red-dk); }
+.btn-mdi:focus, .btn-mdi.focus { color: #fff; background: var(--mdi-red-dk); border-color: var(--mdi-red-dk); box-shadow: 0 0 0 .2rem rgba(227,23,30,.35); }
+.btn-mdi:active, .btn-mdi.active { color: #fff; background: var(--mdi-red-dk) !important; border-color: var(--mdi-red-dk) !important; }
+.card.qr-border { border: 1px solid var(--mdi-silver); border-top: 3px solid var(--mdi-red); }
 .qr-toolbar { margin-bottom: 4px; }
 .qr-toolbar .btn { margin-bottom: 4px; }
 .qr-stat { border: 1px solid #dee2e6; border-top-width: 4px; border-radius: 4px; padding: 10px 8px; background: #fff; }

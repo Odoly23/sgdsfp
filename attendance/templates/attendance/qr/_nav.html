@@ -1,10 +1,10 @@
 {% load qr_i18n %}
 <div class="qr-toolbar">
-	{% if can_view %}<a class="btn btn-sm btn-info{% if active == 'today' %} active{% endif %}" href="{% url 'qr-today' %}">{% t 'nav.today' %}</a>{% endif %}
-	{% if can_view %}<a class="btn btn-sm btn-info{% if active == 'report' %} active{% endif %}" href="{% url 'qr-report' %}">{% t 'nav.report' %}</a>{% endif %}
-	{% if can_manage %}<a class="btn btn-sm btn-info{% if active == 'cards' %} active{% endif %}" href="{% url 'qr-cards' %}">{% t 'nav.cards' %} <i class="fa fa-qrcode"></i></a>{% endif %}
-	{% if can_device %}<a class="btn btn-sm btn-info{% if active == 'devices' %} active{% endif %}" href="{% url 'qr-devices' %}">{% t 'nav.devices' %} <i class="fa fa-desktop"></i></a>{% endif %}
-	<a class="btn btn-sm btn-info{% if active == 'me' %} active{% endif %}" href="{% url 'qr-me' %}">{% t 'nav.me' %}</a>
-	<a class="btn btn-sm btn-info" href="{% url 'qr-kiosk' %}" target="_blank" rel="noopener">{% t 'nav.kiosk' %} <i class="fa fa-external-link"></i></a>
+	{% if can_view %}<a class="btn btn-sm btn-mdi{% if active == 'today' %} active{% endif %}" href="{% url 'qr-today' %}">{% t 'nav.today' %}</a>{% endif %}
+	{% if can_view %}<a class="btn btn-sm btn-mdi{% if active == 'report' %} active{% endif %}" href="{% url 'qr-report' %}">{% t 'nav.report' %}</a>{% endif %}
+	{% if can_manage %}<a class="btn btn-sm btn-mdi{% if active == 'cards' %} active{% endif %}" href="{% url 'qr-cards' %}">{% t 'nav.cards' %} <i class="fa fa-qrcode"></i></a>{% endif %}
+	{% if can_device %}<a class="btn btn-sm btn-mdi{% if active == 'devices' %} active{% endif %}" href="{% url 'qr-devices' %}">{% t 'nav.devices' %} <i class="fa fa-desktop"></i></a>{% endif %}
+	<a class="btn btn-sm btn-mdi{% if active == 'me' %} active{% endif %}" href="{% url 'qr-me' %}">{% t 'nav.me' %}</a>
+	<a class="btn btn-sm btn-mdi" href="{% url 'qr-kiosk' %}" target="_blank" rel="noopener">{% t 'nav.kiosk' %} <i class="fa fa-external-link"></i></a>
 	{% if not navbar_lang %}<span class="float-right">{% flags 'link' %}</span>{% endif %}
 </div>

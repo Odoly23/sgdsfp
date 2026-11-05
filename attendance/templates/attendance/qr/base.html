@@ -1,6 +1,6 @@
 {% extends 'main/layout.html' %}
 {% load static qr_i18n %}
-{% comment %}Kerangka halaman absensi QR: sama dengan halaman absensia lama (breadcrumb + kartu + tombol btn-info).{% endcomment %}
+{% comment %}Kerangka halaman absensi QR: sama dengan halaman absensia lama (breadcrumb + kartu + tombol merah MDI btn-mdi).{% endcomment %}
 {% block content %}
 <link rel="stylesheet" href="{% static 'attendance/qr/qr.css' %}">
 <div class="breadcrumb-holder">
@@ -14,7 +14,7 @@
 <div class="container-fluid"><br/>
 	<div class="row">
 		<div class="col-sm-12">
-			<div class="card shadow-lg pt-1 border-primary rounded">
+			<div class="card shadow-lg pt-1 qr-border rounded">
 				<div class="card-header">{{ legend|upper }}</div>
 				<div class="card-body">
 					{% include 'attendance/qr/_nav.html' %}
