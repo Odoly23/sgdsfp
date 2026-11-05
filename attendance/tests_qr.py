@@ -634,6 +634,7 @@ class I18nTests(QRBase):
 		html = render_to_string('attendance/qr/_navbar_lang.html', {}, request=req)
 		self.assertEqual(html.count('hreflang='), 4)
 		self.assertIn('qr-navbar-lang', html)
+		self.assertIn('attendance/qr/qr.css', html)      # rapi juga di halaman non-absensi (Painel Absensia, dll.)
 
 	def test_kiosk_has_flags_in_top_bar_and_all_languages(self):
 		import json
