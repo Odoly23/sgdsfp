@@ -1,0 +1,8 @@
+{% load qr_i18n %}
+<form method="get" class="qr-form">
+	{% if show_div %}<select name="div" class="form-control" aria-label="{% t 'f.division' %}"><option value="">{% t 'f.all_div' %}</option>
+		{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>{% endif %}
+	<select name="month" class="form-control" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+	<select name="year" class="form-control" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+	<button class="btn btn-mdi" type="submit">{% t 'f.show' %}</button>
+</form>

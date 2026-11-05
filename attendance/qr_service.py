@@ -35,11 +35,22 @@ _DEFAULTS = {
 	'KIOSK_ALLOWED_IPS': [],   # contoh ['192.168.1.0/24']; kosong = scan diterima dari jaringan mana pun
 	'REQUIRE_DEVICE_KEY': False,   # True = kiosk wajib memakai kunci perangkat (opsional)
 	'TRUST_PROXY_HEADER': False,   # True bila server di belakang proxy tepercaya (pakai X-Forwarded-For)
+	'MANAGER_GROUPS': ['admin', 'staff'],
+	'VIEWER_GROUPS': ['admin', 'staff', 'president'],
+	'DEVICE_GROUPS': ['admin'],
+	'SELF_GROUPS': ['admin', 'staff', 'president', 'funsionario', 'employee'],
 }
 
 
 def conf(name):
 	return getattr(settings, 'ATTENDANCE_' + name, _DEFAULTS[name])
+
+
+def group_of(user):
+	"""Nama grup pertama pengguna, sama seperti allowed_users di proyek."""
+	if not getattr(user, 'is_authenticated', False) or not user.groups.exists():
+		return ''
+	return user.groups.all()[0].name
 
 
 def local_tz():
@@ -155,13 +166,14 @@ def employee_division(emp):
 	return None
 
 
-def employee_info(emp):
+def employee_info(emp, photo=True):
 	pos = getattr(getattr(emp, 'employeeposition', None), 'position', None)
 	div = employee_division(emp)
 	nrf = getattr(getattr(emp, 'idfnumber', None), 'nrf', None)
 	return {
 		'id': emp.pk, 'name': str(emp).strip(), 'position': str(pos) if pos else '',
-		'division': div.name if div else '', 'nrf': nrf or '', 'photo': photo_url(emp),
+		'division': div.name if div else '', 'division_id': div.pk if div else None,
+		'nrf': nrf or '', 'photo': photo_url(emp) if photo else '',
 	}
 
 
@@ -186,6 +198,17 @@ def day_off_reason(d):
 	if t:
 		return 'tolerance', t.name or ''
 	return None
+
+
+def holiday_map():
+	"""{(bulan, tanggal): (jenis, nama)} dari NacionalHoliday dan Tolerance yang aktif, hanya 2 query.
+	Urutan prioritas sama dengan day_off_reason: libur nasional menang atas hari toleransi."""
+	out = {}
+	for t in Tolerance.objects.exclude(is_active=False):
+		out[(t.date.month, t.date.day)] = ('tolerance', t.name or '')
+	for h in NacionalHoliday.objects.exclude(is_active=False):
+		out[(h.date.month, h.date.day)] = ('holiday', h.name or '')
+	return out
 
 
 def active_leave(emp, d):
@@ -332,7 +355,7 @@ def _row_status(att):
 	return ''
 
 
-def month_report(year, month, division=None, employee=None):
+def month_report(year, month, division=None, employee=None, hol=None):
 	"""Rekap per pegawai per hari. Kode sel: P hadir, L cuti, F alpha, W akhir pekan, H libur, '' belum/tidak ada."""
 	last_day = datetime.date(year, month, 1).replace(day=28) + datetime.timedelta(days=4)
 	last_day = last_day.replace(day=1) - datetime.timedelta(days=1)
@@ -340,15 +363,18 @@ def month_report(year, month, division=None, employee=None):
 	today = to_local(timezone.now()).date()
 	days = list(range(1, last_day.day + 1))
 
+	hol = holiday_map() if hol is None else hol
 	off = {}
 	for d in days:
 		date = first_day.replace(day=d)
-		reason = day_off_reason(date)
+		reason = ('weekend', '') if date.weekday() >= 5 else hol.get((month, d))
 		if reason:
 			off[d] = ('W' if reason[0] == 'weekend' else 'H', reason)
 
 	emps = (Employee.objects.filter(status_id=conf('ACTIVE_STATUS_ID'))
-			.select_related('employeeposition__position', 'employeedivision__division', 'idfnumber'))
+			.select_related('employeeposition__position', 'employeedivision__division',
+							'employeedivision__department__division', 'employeedivision__section__department__division',
+							'idfnumber'))
 	if employee is not None:
 		emps = emps.filter(pk=employee.pk)
 	elif division is not None:
@@ -372,7 +398,8 @@ def month_report(year, month, division=None, employee=None):
 		tot = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0}
 		for d in days:
 			date = first_day.replace(day=d)
-			cell = {'day': d, 'code': '', 'late': False, 'early': False, 'no_out': False, 'in': '', 'out': ''}
+			cell = {'day': d, 'date': date, 'wd': date.weekday(), 'code': '', 'late': False, 'early': False,
+					'no_out': False, 'in': '', 'out': '', 'holiday': off[d][1][1] if d in off else ''}
 			if d in off:
 				cell['code'] = off[d][0]
 				cells.append(cell)
@@ -402,7 +429,67 @@ def month_report(year, month, division=None, employee=None):
 			elif cell['code'] == 'F':
 				tot['absent'] += 1
 			cells.append(cell)
-		info = employee_info(e)
+		info = employee_info(e, photo=False)   # foto tidak dipakai di laporan: hindari 1 query per pegawai
 		info['hashed'] = e.hashed
-		rows.append({'employee': info, 'cells': cells, 'totals': tot})
+		seen = tot['present'] + tot['absent']
+		tot['rate'] = round(100.0 * tot['present'] / seen) if seen else None
+		rows.append({'employee': info, 'cells': cells, 'totals': tot, 'weeks': calendar_weeks(year, month, cells)})
 	return {'year': year, 'month': month, 'days': days, 'off': off, 'rows': rows}
+
+
+def calendar_weeks(year, month, cells):
+	"""Kalender mini (Senin..Minggu): daftar minggu, tiap sel adalah dict hari atau None untuk kotak kosong."""
+	padded = [None] * datetime.date(year, month, 1).weekday() + list(cells)
+	padded += [None] * (-len(padded) % 7)
+	return [padded[i:i + 7] for i in range(0, len(padded), 7)]
+
+
+_ZERO = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0, 'rate': None}
+
+
+def year_summary(employee, year):
+	"""Total per bulan (12 elemen) untuk satu pegawai. Libur dimuat sekali untuk seluruh tahun."""
+	hol = holiday_map()
+	out = []
+	for m in range(1, 13):
+		rep = month_report(year, m, employee=employee, hol=hol)
+		out.append(rep['rows'][0]['totals'] if rep['rows'] else dict(_ZERO))
+	return out
+
+
+def overview(rep):
+	"""Ringkasan seluruh pegawai dari satu month_report: total, per divisi, tren harian, paling sering terlambat."""
+	rows = rep['rows']
+	keys = ('present', 'late', 'leave', 'absent', 'no_out', 'early')
+	tot = {k: sum(r['totals'][k] for r in rows) for k in keys}
+	seen = tot['present'] + tot['absent']
+	tot['rate'] = round(100.0 * tot['present'] / seen) if seen else None
+	tot['employees'] = len(rows)
+
+	divs = {}
+	for r in rows:
+		e = r['employee']
+		d = divs.setdefault(e['division'] or '-', {'name': e['division'] or '-', 'id': e['division_id'],
+												 'employees': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0})
+		d['employees'] += 1
+		for k in ('present', 'late', 'leave', 'absent'):
+			d[k] += r['totals'][k]
+	division_rows = sorted(divs.values(), key=lambda d: d['name'])
+	for d in division_rows:
+		seen = d['present'] + d['absent']
+		d['rate'] = round(100.0 * d['present'] / seen) if seen else None
+
+	daily = {'label': rep['days'], 'present': [], 'late': [], 'leave': [], 'absent': []}
+	today = to_local(timezone.now()).date()
+	for i, day in enumerate(rep['days']):
+		if day in rep['off'] or datetime.date(rep['year'], rep['month'], day) > today:   # libur dan hari yang belum terjadi: kosong
+			for k in ('present', 'late', 'leave', 'absent'):
+				daily[k].append(None)
+			continue
+		cs = [r['cells'][i] for r in rows]
+		daily['present'].append(sum(1 for c in cs if c['code'] == 'P'))
+		daily['late'].append(sum(1 for c in cs if c['code'] == 'P' and c['late']))
+		daily['leave'].append(sum(1 for c in cs if c['code'] == 'L'))
+		daily['absent'].append(sum(1 for c in cs if c['code'] == 'F'))
+	late_top = sorted((r for r in rows if r['totals']['late']), key=lambda r: (-r['totals']['late'], r['employee']['name']))[:10]
+	return {'totals': tot, 'divisions': division_rows, 'daily': daily, 'late_top': late_top}

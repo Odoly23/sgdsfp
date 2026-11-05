@@ -4,6 +4,8 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import Group, User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -722,3 +724,340 @@ class I18nTests(QRBase):
 		text = self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).content.decode('utf-8-sig')
 		self.assertTrue(text.startswith('NRF,Name,Position,Division,1,2'))
 		self.assertIn('Work days,Present,Late,Leave,Absent', text)
+
+
+class ReportEngineTests(QRBase):
+	def test_calendar_weeks_shape(self):
+		rep = svc.month_report(2026, 11, employee=self.emp)       # 1 Nov 2026 = Minggu
+		weeks = rep['rows'][0]['weeks']
+		self.assertTrue(all(len(w) == 7 for w in weeks))
+		self.assertEqual(weeks[0][:6], [None] * 6)
+		self.assertEqual(weeks[0][6]['day'], 1)
+		self.assertEqual(sum(1 for w in weeks for c in w if c), 30)
+		self.assertEqual(len(weeks), 6)                       # 6 kotak kosong + 30 hari = 36 -> 6 minggu
+
+	def test_cells_carry_date_weekday_and_holiday_name(self):
+		NacionalHoliday.objects.create(name='Hari Kemerdekaan', date=datetime.date(2020, 11, 12))
+		cells = svc.month_report(2026, 11, employee=self.emp)['rows'][0]['cells']
+		self.assertEqual((cells[8]['date'], cells[8]['wd']), (MON, 0))
+		self.assertEqual((cells[11]['code'], cells[11]['holiday']), ('H', 'Hari Kemerdekaan'))
+		self.assertEqual(cells[0]['code'], 'W')
+
+	def test_attendance_rate(self):
+		self.scan(MON, 8)
+		with mock.patch.object(timezone, 'now', lambda: at(MON + datetime.timedelta(days=2), 12)):   # Rabu 11
+			t = svc.month_report(2026, 11, employee=self.emp)['rows'][0]['totals']
+		# 2-6 Nov alpha (5), 9 Nov hadir, 10 Nov alpha; 11 Nov (hari ini) belum dihitung
+		self.assertEqual((t['present'], t['absent'], t['rate']), (1, 6, 14))
+
+	def test_holiday_map_precedence(self):
+		y = Year.objects.create(year=2026, is_active=True)
+		Tolerance.objects.create(year=y, name='Toleransi', date=MON)
+		self.assertEqual(svc.holiday_map()[(11, 9)], ('tolerance', 'Toleransi'))
+		NacionalHoliday.objects.create(name='Nasional', date=MON)
+		self.assertEqual(svc.holiday_map()[(11, 9)], ('holiday', 'Nasional'))
+		NacionalHoliday.objects.create(name='X', date=datetime.date(2026, 12, 25), is_active=False)
+		self.assertNotIn((12, 25), svc.holiday_map())
+
+	def test_month_report_query_count_does_not_grow_with_employees(self):
+		for i in range(25):
+			self.make_employee('Peg%d' % i, 'X')
+		with CaptureQueriesContext(connection) as q:
+			rep = svc.month_report(2026, 11)
+		self.assertEqual(len(rep['rows']), 26)
+		self.assertLess(len(q), 12)
+
+	def test_year_summary(self):
+		self.scan(MON, 8, 0)
+		self.scan(datetime.date(2026, 3, 10), 9, 0)      # Selasa, terlambat
+		with CaptureQueriesContext(connection) as q:
+			months = svc.year_summary(self.emp, 2026)
+		self.assertEqual(len(months), 12)
+		self.assertEqual((months[10]['present'], months[2]['present'], months[2]['late']), (1, 1, 1))
+		self.assertLess(len(q), 60)
+
+	def test_overview(self):
+		other_div = Division.objects.create(code='D2', name='Divisi Dua')
+		e2 = self.make_employee('Ana', 'Lopes')
+		EmployeeDivision.objects.filter(employee=e2).update(division=other_div)
+		c2 = QRCard.objects.create(employee=e2)
+		self.scan(MON, 8, 0)
+		self.scan(MON, 9, 0, payload=svc.make_payload(c2))               # Ana terlambat
+		self.scan(MON + datetime.timedelta(days=1), 9, 30, payload=svc.make_payload(c2))
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 11), 12)):
+			ov = svc.overview(svc.month_report(2026, 11))
+		t = ov['totals']
+		self.assertEqual((t['employees'], t['present'], t['late']), (2, 3, 2))
+		names = [d['name'] for d in ov['divisions']]
+		self.assertEqual(names, ['Divisi Dua', 'Divisi Satu'])
+		self.assertEqual(ov['late_top'][0]['employee']['name'], 'Ana Lopes')
+		self.assertEqual(ov['late_top'][0]['totals']['late'], 2)
+		self.assertIsNone(ov['daily']['present'][0])                     # 1 Nov = Minggu
+		self.assertEqual(ov['daily']['present'][8], 2)                   # 9 Nov
+		self.assertEqual(ov['daily']['late'][8], 1)
+		self.assertIsNotNone(ov['daily']['present'][10])                 # 11 Nov = hari ini
+		self.assertIsNone(ov['daily']['present'][11])                    # 12 Nov belum terjadi: kosong, bukan 0
+		self.assertIsNone(ov['daily']['absent'][20])
+
+	def test_overview_empty(self):
+		Employee.objects.all().delete()
+		ov = svc.overview(svc.month_report(2026, 11))
+		self.assertEqual((ov['totals']['employees'], ov['totals']['rate'], ov['divisions'], ov['late_top']), (0, None, [], []))
+
+
+class ReportPageTests(QRBase):
+	def login(self, group, link=False):
+		u = User.objects.create_user('u_' + group, password='x')
+		u.groups.add(Group.objects.get_or_create(name=group)[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		if link:
+			from employee.models import EmployeeUser
+			EmployeeUser.objects.create(employee=self.emp, user=u)
+		return u
+
+	def test_dash_pages_for_viewers_only(self):
+		for group, ok in [('admin', True), ('staff', True), ('president', True), ('funsionario', False), ('employee', False)]:
+			self.client.logout()
+			self.login(group)
+			for name in ('qr-dash', 'qr-dash-chart'):
+				r = self.client.get(reverse(name))
+				self.assertEqual(r.status_code, 200, (group, name))
+				self.assertEqual('Dasbor laporan absensi' in r.content.decode(), ok, (group, name))
+				if not ok:
+					self.assertContains(r, '403')
+
+	def test_dash_tabular_content(self):
+		self.login('admin')
+		self.scan(MON, 9, 0)
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 13), 12)):
+			r = self.client.get(reverse('qr-dash'), {'year': 2026, 'month': 11})
+		self.assertContains(r, 'ABSENSI BULAN NOVEMBER TAHUN 2026')
+		self.assertContains(r, 'Divisi Satu')
+		self.assertContains(r, '?year=2026&month=11&div=%d' % self.div.pk)     # tautan ke rekap divisi
+		self.assertContains(r, 'qr-stack')
+		self.assertContains(r, 'qr-tiles')
+		self.assertContains(r, 'qr-subtabs')
+
+	def test_dash_filter_by_division(self):
+		self.login('admin')
+		other = Division.objects.create(code='D2', name='Divisi Dua')
+		e2 = self.make_employee('Ana', 'Lopes')
+		EmployeeDivision.objects.filter(employee=e2).update(division=other)
+		r = self.client.get(reverse('qr-dash'), {'div': other.pk})
+		self.assertContains(r, 'Divisi Dua')
+		self.assertNotContains(r, '>Divisi Satu</a>')
+
+	def test_api_dash_requires_login_and_group_with_json_errors(self):
+		url = reverse('qr-api-dash')
+		r = self.client.get(url)
+		self.assertEqual((r.status_code, r.json()['error']), (401, 'login'))
+		self.login('funsionario')
+		r = self.client.get(url)
+		self.assertEqual((r.status_code, r.json()['error']), (403, 'forbidden'))
+		self.assertEqual(self.client.post(url).status_code, 405)
+
+	def test_api_dash_data_shape_and_language(self):
+		self.login('president')
+		self.scan(MON, 9, 0)
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 13), 12)):
+			r = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11})
+		self.assertEqual(r['Cache-Control'], 'no-store')
+		d = r.json()
+		self.assertEqual(d['divisions']['label'], ['Divisi Satu'])
+		self.assertEqual([s['key'] for s in d['divisions']['series']], ['present', 'late', 'leave', 'absent'])
+		self.assertEqual([s['name'] for s in d['divisions']['series']], ['Hadir', 'Hadir, terlambat', 'Cuti', 'Alpha'])
+		self.assertEqual([s['data'][0] for s in d['divisions']['series']], [0, 1, 0, 8])   # terlambat dipisah dari tepat waktu; alpha: 2-6 dan 10-12 Nov
+		self.assertEqual(len(d['daily']['label']), 30)
+		self.assertIsNone(d['daily']['series'][0]['data'][0])                              # akhir pekan = null
+		self.assertEqual(d['late_top']['label'], ['Maria Silva'])
+		self.client.cookies['mdi_lang'] = 'pt'
+		d = self.client.get(reverse('qr-api-dash')).json()
+		self.assertEqual(d['divisions']['series'][2]['name'], 'Licença')
+
+	def test_me_tabular_requires_own_link_and_shows_tiles_and_days(self):
+		self.login('funsionario', link=True)
+		self.scan(MON, 9, 0)
+		self.scan(MON + datetime.timedelta(days=1), 8, 0)
+		self.scan(MON + datetime.timedelta(days=1), 15, 0)
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 13), 12)):
+			r = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11})
+		html = r.content.decode()
+		for status in ('present', 'late', 'leave', 'absent', 'early', 'noout'):
+			self.assertIn('status=%s' % status, html)
+		self.assertContains(r, 'qr-cal')
+		self.assertIn('09/11', html)
+		self.assertNotIn('07/11', html)                      # Sabtu tidak ada di daftar
+		self.assertContains(r, 'Sen 09/11')
+
+	def test_me_status_filter(self):
+		self.login('employee', link=True)
+		self.scan(MON, 9, 0)                                 # terlambat
+		self.scan(MON + datetime.timedelta(days=1), 8, 0)    # tepat waktu
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 13), 12)):
+			html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11, 'status': 'late'}).content.decode()
+			self.assertIn('Sen 09/11', html)
+			self.assertNotIn('Sel 10/11', html)
+			self.assertIn('Filter: Terlambat', html)
+			html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11, 'status': 'bogus'}).content.decode()
+			self.assertIn('Sel 10/11', html)
+			self.assertNotIn('Filter:', html)
+			html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11, 'status': 'noout'}).content.decode()
+			self.assertIn('Belum scan pulang', html)
+
+	def test_me_shows_holiday_row_with_name(self):
+		NacionalHoliday.objects.create(name='Hari Test', date=datetime.date(2020, 11, 12))
+		self.login('funsionario', link=True)
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 13), 12)):
+			self.assertContains(self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11}), 'Hari Test')
+
+	def test_me_list_hides_future_days_but_keeps_today(self):
+		self.login('funsionario', link=True)
+		with mock.patch.object(timezone, 'now', lambda: at(datetime.date(2026, 11, 11), 10)):     # Rabu 11 Nov
+			html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertIn('Rab 11/11', html)                  # hari ini, belum ada scan
+		self.assertNotIn('Kam 12/11', html)
+		self.assertNotIn('Sen 16/11', html)
+		self.assertIn('qr-cal', html)                     # kalender mini tetap memuat seluruh bulan
+
+	def test_me_unlinked_account(self):
+		self.login('funsionario')
+		self.assertContains(self.client.get(reverse('qr-me')), 'belum dihubungkan')
+		self.assertContains(self.client.get(reverse('qr-me-chart')), 'belum dihubungkan')
+
+	def test_me_chart_page_and_api(self):
+		self.login('funsionario', link=True)
+		self.scan(MON, 9, 0)
+		r = self.client.get(reverse('qr-me-chart'), {'year': 2026, 'month': 11})
+		self.assertContains(r, 'class="qr-charts"')
+		self.assertContains(r, 'main/js_custom/highcharts.js')
+		self.assertContains(r, 'attendance/qr/charts.js')
+		self.assertContains(r, reverse('qr-api-me'))
+		d = self.client.get(reverse('qr-api-me'), {'year': 2026, 'month': 11}).json()
+		self.assertEqual(d['year']['label'][:3], ['Jan', 'Feb', 'Mar'])
+		self.assertEqual([len(s['data']) for s in d['year']['series']], [12] * 4)
+		self.assertEqual(d['year']['series'][1]['data'][10], 1)             # terlambat, November
+		self.assertEqual(d['status']['obj'][1], 1)
+		self.assertEqual(d['status']['keys'], ['present', 'late', 'leave', 'absent'])
+
+	def test_api_me_only_returns_own_data_and_ignores_client_ids(self):
+		other = self.make_employee('Jose', 'Costa')
+		oc = QRCard.objects.create(employee=other)
+		self.scan(MON, 8, 0, payload=svc.make_payload(oc))
+		self.scan(MON + datetime.timedelta(days=1), 8, 0, payload=svc.make_payload(oc))
+		self.login('funsionario', link=True)
+		self.scan(MON, 8, 0)
+		d = self.client.get(reverse('qr-api-me'), {'year': 2026, 'month': 11, 'employee': other.pk, 'id': other.pk}).json()
+		self.assertEqual(d['year']['series'][0]['data'][10], 1)             # hanya milik sendiri, bukan 2
+
+	def test_api_me_errors_are_json(self):
+		url = reverse('qr-api-me')
+		self.assertEqual(self.client.get(url).status_code, 401)
+		self.login('funsionario')
+		r = self.client.get(url)
+		self.assertEqual((r.status_code, r.json()['error']), (404, 'unlinked'))
+		self.client.logout()
+		self.login('stranger', link=True)
+		self.assertEqual(self.client.get(url).status_code, 403)
+
+	def test_employee_group_is_allowed_by_default(self):
+		self.login('employee', link=True)
+		for name in ('qr-me', 'qr-me-chart', 'qr-api-me'):
+			self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+
+	def test_subtabs_switch_between_tabular_and_charts(self):
+		self.login('funsionario', link=True)
+		html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertIn('href="%s?year=2026&amp;month=11"' % reverse('qr-me-chart'), html)
+		self.assertIn('<a role="tab" class="on" href="%s' % reverse('qr-me'), html)
+		self.login('admin')
+		html = self.client.get(reverse('qr-dash-chart'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertIn(reverse('qr-dash') + '?year=2026', html)
+
+	def test_menu_snippets_point_to_right_pages_per_group(self):
+		from django.template.loader import render_to_string
+		from django.test import RequestFactory
+		for group, tab, chart in [('admin', 'qr-dash', 'qr-dash-chart'), ('president', 'qr-dash', 'qr-dash-chart'),
+								  ('funsionario', 'qr-me', 'qr-me-chart'), ('employee', 'qr-me', 'qr-me-chart')]:
+			u = User.objects.create_user('m_' + group, password='x')
+			u.groups.add(Group.objects.get_or_create(name=group)[0])
+			req = RequestFactory().get('/')
+			req.user = u
+			req.COOKIES['mdi_lang'] = 'tet'
+			html = render_to_string('attendance/qr/_navbar_report.html', {}, request=req)
+			self.assertIn('href="%s"' % reverse(tab), html, group)
+			self.assertIn('href="%s"' % reverse(chart), html, group)
+			self.assertIn('dropdown-menu', html)
+			self.assertIn('RELATORIU', html)
+			self.assertIn('Tabular', html)
+			self.assertIn('Grafiku', html)
+			home = render_to_string('attendance/qr/_home_button.html', {}, request=req)
+			self.assertIn('href="%s"' % reverse(tab), home)
+
+	def test_menu_snippets_in_each_language(self):
+		from django.template.loader import render_to_string
+		from django.test import RequestFactory
+		u = User.objects.create_user('lang', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		for lang, report, chart in [('en', 'REPORTS', 'Charts'), ('id', 'LAPORAN', 'Grafik'), ('pt', 'RELATÓRIOS', 'Gráficos')]:
+			req = RequestFactory().get('/')
+			req.user = u
+			req.COOKIES['mdi_lang'] = lang
+			html = render_to_string('attendance/qr/_navbar_report.html', {}, request=req)
+			self.assertIn(report, html)
+			self.assertIn(chart, html)
+
+
+class ResponsiveTests(QRBase):
+	def login_admin(self):
+		u = User.objects.create_user('rsp', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+
+	def test_standalone_pages_have_viewport_meta(self):
+		self.login_admin()
+		kiosk = self.client.get(reverse('qr-kiosk')).content.decode()
+		cards = self.client.post(reverse('qr-card-print'), {'ids': [self.emp.pk]}).content.decode()
+		for html in (kiosk, cards):
+			self.assertIn('<meta name="viewport" content="width=device-width, initial-scale=1">', html)
+
+	def test_report_has_card_view_for_phones_and_grid_for_wide_screens(self):
+		self.login_admin()
+		self.scan(MON, 8)
+		html = self.client.get(reverse('qr-report'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertIn('class="d-md-none"', html)
+		self.assertIn('class="d-none d-md-block"', html)
+		self.assertIn('qr-empcards', html)
+		self.assertIn('qr-cal', html)
+		self.assertEqual(html.count('class="qr-cal-h"'), 7)
+		self.assertIn('class="table-responsive"', html)
+
+	def test_tables_collapse_to_cards_with_labels(self):
+		self.login_admin()
+		self.scan(MON, 8)
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 12)):
+			html = self.client.get(reverse('qr-today')).content.decode()
+		self.assertIn('qr-stack', html)
+		self.assertIn('data-label="Nama"', html)
+		html = self.client.get(reverse('qr-cards')).content.decode()
+		self.assertIn('qr-stack', html)
+		self.assertIn('data-label="Jabatan"', html)
+
+	def test_forms_and_toolbar_use_touch_friendly_classes(self):
+		self.login_admin()
+		html = self.client.get(reverse('qr-report')).content.decode()
+		self.assertIn('class="qr-form"', html)
+		self.assertIn('qr-toolbar', html)
+
+	def test_css_is_mobile_first(self):
+		import pathlib, re
+		css = (pathlib.Path(__file__).parent / 'static' / 'attendance' / 'qr' / 'qr.css').read_text(encoding='utf-8')
+		self.assertNotIn('max-width: 900px', css)                       # tidak lagi desktop-first
+		for width in (576, 768, 900, 992):
+			self.assertIn('@media (min-width: %dpx)' % width, css)
+		base = css[:css.index('@media (min-width: 576px)')]
+		self.assertIn('grid-template-columns: repeat(2', base)          # dasar = 2 kolom (HP)
+		self.assertIn('min-height: 46px', base)                         # sasaran sentuh >= 44px
+		self.assertIn('.k-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr)', base)
+		self.assertRegex(css, r'\.k-top \{[^}]*flex-wrap: wrap')           # header kiosk membungkus di HP

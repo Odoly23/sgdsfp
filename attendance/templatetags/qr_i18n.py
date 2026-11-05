@@ -2,7 +2,10 @@ from django import template
 from django.utils.html import format_html_join, escape
 from django.utils.safestring import mark_safe
 
+from django.urls import reverse
+
 from attendance import qr_i18n as i18n
+from attendance import qr_service as svc
 
 register = template.Library()
 
@@ -59,3 +62,20 @@ def flags(context, mode='link'):
 		'items': [{'code': c, 'name': i18n.LANG_NAMES[c], 'svg': mark_safe(FLAG_SVG[c]), 'on': c == cur} for c in i18n.LANGS],
 		'mode': mode, 'next': request.get_full_path() if request is not None else '/',
 	}
+
+
+def _is_viewer(context):
+	request = context.get('request')
+	return request is not None and svc.group_of(request.user) in svc.conf('VIEWER_GROUPS')
+
+
+@register.simple_tag(takes_context=True)
+def qr_tab_url(context):
+	"""Tujuan menu "Tabular": dashboard untuk pimpinan, laporan pribadi untuk pegawai."""
+	return reverse('qr-dash' if _is_viewer(context) else 'qr-me')
+
+
+@register.simple_tag(takes_context=True)
+def qr_chart_url(context):
+	"""Tujuan menu "Grafiku"."""
+	return reverse('qr-dash-chart' if _is_viewer(context) else 'qr-me-chart')

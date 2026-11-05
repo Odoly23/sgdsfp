@@ -1,0 +1,17 @@
+{% extends 'attendance/qr/base.html' %}
+{% load static qr_i18n %}
+{% block qr_body %}
+{% include 'attendance/qr/_subtabs.html' %}
+{% include 'attendance/qr/_period_form.html' with show_div=True %}
+<h3 align="center" class="qr-h">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
+<p class="text-center text-muted">{% if div %}{{ div.name }}{% else %}{% t 'rep.all' %}{% endif %}</p>
+<div class="qr-charts" data-url="{{ api_url }}" data-na="{% t 'dash.chart_na' %}" data-empty="{% t 'grid.empty' %}" data-empty-late="{% t 'dash.no_late' %}">
+	{% t 'dash.by_div' as t1 %}{% include 'attendance/qr/_chart.html' with title=t1 part='divisions' kind='stack' %}
+	{% t 'dash.daily' as t2 %}{% include 'attendance/qr/_chart.html' with title=t2 part='daily' kind='line' %}
+	{% t 'dash.late_top' as t3 %}{% include 'attendance/qr/_chart.html' with title=t3 part='late_top' kind='bar' %}
+</div>
+{% endblock %}
+{% block qr_scripts %}
+<script src="{% static 'main/js_custom/highcharts.js' %}"></script>
+<script src="{% static 'attendance/qr/charts.js' %}"></script>
+{% endblock %}

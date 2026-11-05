@@ -13,10 +13,10 @@ attendance/qr_service.py       aturan scan, tanda tangan QR, jaringan, rekap
 attendance/qr_i18n.py          semua teks 4 bahasa (Tetun, English, Indonesia, Português)
 attendance/views_qr.py         halaman kiosk, hari ini, kartu, perangkat, rekap, ganti bahasa
 attendance/urls_qr.py
-attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %})
-attendance/tests_qr.py         78 tes otomatis
+attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
+attendance/tests_qr.py         108 tes otomatis
 attendance/templates/attendance/qr/*
-attendance/static/attendance/qr/*      (qr.css, kiosk.js, mdi-logo.jpg)
+attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
 
 ## 2. Tiga baris yang harus ditambah
@@ -62,7 +62,7 @@ ATTENDANCE_TRUST_PROXY_HEADER = False   # True hanya bila server di belakang pro
 ATTENDANCE_MANAGER_GROUPS = ['admin', 'staff']              # kartu QR
 ATTENDANCE_VIEWER_GROUPS = ['admin', 'staff', 'president']  # hari ini + rekap
 ATTENDANCE_DEVICE_GROUPS = ['admin']                        # kunci perangkat kiosk
-ATTENDANCE_SELF_GROUPS = ['admin', 'staff', 'president', 'funsionario']
+ATTENDANCE_SELF_GROUPS = ['admin', 'staff', 'president', 'funsionario', 'employee']
 ATTENDANCE_CARD_BACK_NOTE = {'tet': '...', 'en': '...', 'id': '...', 'pt': '...'}  # atau satu string
 ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (string atau dict per bahasa)
 ```
@@ -92,7 +92,20 @@ dan Konfigurasaun:
 ```
 Tombol itu membuka **Hari ini**; dari sana ada tombol ke Rekap, Kartu QR, dan Perangkat kiosk. Tombolnya ikut 4 bahasa.
 
-**Menu navbar (opsional)**, mis. di `adm.html`:
+**Menu RELATORIU di navbar** (sama seperti menu RELATORIU Tabular / Grafiku yang Anda punya): tempel satu baris di
+`adm.html`, `staff.html`, `prezident.html`, dan `funsionario.html`, sebelum menu profil:
+```html
+{% include 'attendance/qr/_navbar_report.html' %}
+```
+Hasilnya dropdown **RELATORIU → Tabular / Grafiku** (4 bahasa). Tujuannya otomatis mengikuti grup:
+admin, staff, president ke dashboard seluruh pegawai; funsionario dan employee ke laporan absensinya sendiri.
+
+**Tombol di Varanda (home)**, besar dan mudah diketuk di HP:
+```html
+{% include 'attendance/qr/_home_button.html' %}
+```
+
+**Menu ABSENSI QR untuk admin (opsional)**, mis. di `adm.html`:
 ```html
 <li class="nav-item dropdown active">
 	<a class="nav-link dropdown-toggle" href="#" data-toggle="dropdown"><i class="fa fa-qrcode"></i> ABSENSI QR</a>
@@ -104,8 +117,7 @@ Tombol itu membuka **Hari ini**; dari sana ada tombol ke Rekap, Kartu QR, dan Pe
 	</div>
 </li>
 ```
-Grup `funsionario` cukup tautan ke `{% url 'qr-me' %}`. Halaman sendiri sudah memeriksa grup, jadi
-menu yang salah tidak membuka akses.
+Halaman sendiri sudah memeriksa grup, jadi menu yang salah tidak membuka akses.
 
 **Bendera di topbar kanan:** tempel satu baris ini di setiap menu navbar (`adm.html`, `staff.html`, ...),
 tepat sebelum menu profil (`<li class="nav-item dropdown active">` yang berisi `request.user.username`):
@@ -157,6 +169,31 @@ Empat bahasa: **Tetun (TET), English (EN), Indonesia (ID), Português (PT)**. Ba
   libur/cuti dari database tidak diterjemahkan.
 - Semua teks ada di `qr_i18n.py` (`MESSAGES`). Tes memastikan setiap kunci punya keempat bahasa dan placeholder yang sama.
   **Teks Tetun sebaiknya dibaca ulang oleh penutur asli** sebelum dipakai resmi.
+
+## Laporan: Tabular dan Grafiku
+
+| Siapa | Tabular | Grafiku |
+|---|---|---|
+| admin, staff, president | `/attendance/qr/dash/`: angka total, ringkasan per diresaun (klik ke rekap), 10 paling sering terlambat | `/attendance/qr/dash/chart/`: kehadiran per diresaun, tren harian, paling sering terlambat |
+| funsionario, employee | `/attendance/qr/me/`: angka ringkas yang bisa diklik (menyaring daftar), kalender mini, daftar harian | `/attendance/qr/me/chart/`: grafik setahun per bulan dan diagram status bulan terpilih |
+
+- Pegawai hanya melihat datanya sendiri. Akun dihubungkan lewat `EmployeeUser`; server tidak menerima id pegawai dari
+  browser, jadi tidak bisa mengintip data orang lain. Akun yang belum tertaut melihat pesan "hubungi admin".
+- Grafik memakai **Highcharts** dari `main/js_custom/highcharts.js` (berkas yang sama dengan grafik Anda yang sudah ada).
+  Datanya dari endpoint JSON `api/dash/` dan `api/me/` (login + grup; 401/403 berupa JSON; tidak di-cache). Kalau
+  Highcharts belum termuat, tiap kotak grafik menampilkan pesan dan halaman tetap berfungsi.
+- Kolom "Hadir" pada grafik adalah hadir tepat waktu; "Hadir, terlambat" dipisah agar tidak terhitung ganda.
+
+## Tampilan responsif (mobile-first)
+
+CSS ditulis dari ukuran HP lalu diperluas pada 576 / 768 / 900 / 992 px. Sudah diuji di lebar 360, 768, dan 1280 px:
+tanpa geser horizontal, grafik tampil, sasaran sentuh minimal 44 px.
+- **HP:** tabel menjadi kartu berlabel; rekap bulanan menjadi satu kartu per pegawai dengan kalender mini;
+  kotak angka dua kolom; filter bertumpuk dengan kolom besar; tombol menu dua kolom.
+- **Tablet dan PC:** tabel biasa, rekap berbentuk tabel 31 kolom, kotak angka tiga sampai enam kolom.
+- **Kiosk:** satu kolom di HP dan tablet tegak, dua kolom di layar lebar dan HP mendatar.
+- Syarat: `main/layout.html` harus punya `<meta name="viewport" content="width=device-width, initial-scale=1">`
+  (layout Anda sudah punya). Tanpa itu HP menampilkan versi desktop yang diperkecil.
 
 ## Hubungan dengan absensi manual dan Ativa Tinan / Ativa Fulan
 

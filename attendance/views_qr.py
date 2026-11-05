@@ -2,6 +2,7 @@ import csv
 import datetime
 import io
 import json
+from functools import wraps
 
 import qrcode
 import qrcode.constants
@@ -17,7 +18,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from custom.models import Division
 from employee.models import Employee, EmployeeCard, EmployeeUser
@@ -37,7 +38,7 @@ def _groups(name, default):
 MANAGERS = _groups('MANAGER_GROUPS', ['admin', 'staff'])
 VIEWERS = _groups('VIEWER_GROUPS', ['admin', 'staff', 'president'])
 DEVICE_ADMINS = _groups('DEVICE_GROUPS', ['admin'])
-EVERYONE = _groups('SELF_GROUPS', ['admin', 'staff', 'president', 'funsionario'])
+EVERYONE = _groups('SELF_GROUPS', ['admin', 'staff', 'president', 'funsionario', 'employee'])
 
 
 def _group(request):
@@ -331,7 +332,7 @@ def report(request):
 	return render(request, 'attendance/qr/report.html', _page(
 		request, 'rep.title', rep=rep, year=year, month=month, monthname=i18n.month_name(month, lang), div=div,
 		div_id=div_id, divisions=Division.objects.order_by('name'), years=range(year - 3, year + 2),
-		months=_months(lang), today=_local_today(), active='report'))
+		months=_months(lang), today=_local_today(), active='report', wd_short=i18n.weekday_short(lang)))
 
 
 def _export_rows(rep, lang):
@@ -382,14 +383,166 @@ def report_export(request):
 	return resp
 
 
+# ============================================================ laporan: Tabular dan Grafiku
+
+def _linked(request):
+	link = EmployeeUser.objects.filter(user=request.user).select_related('employee').first()
+	return link.employee if link else None
+
+
+def _division(request):
+	div_id = request.GET.get('div', '')
+	return Division.objects.filter(pk=div_id).first() if div_id.isdigit() else None
+
+
+def _qs(year, month, div=None):
+	return 'year=%d&month=%d%s' % (year, month, '&div=%d' % div.pk if div else '')
+
+
+def _api(groups):
+	"""Endpoint JSON: 401/403 berupa JSON (bukan halaman login atau 403 HTML), hanya GET, tidak di-cache."""
+	def deco(fn):
+		@wraps(fn)
+		@require_GET
+		def inner(request, *a, **kw):
+			if not request.user.is_authenticated:
+				return JsonResponse({'error': 'login'}, status=401)
+			if _group(request) not in groups:
+				return JsonResponse({'error': 'forbidden'}, status=403)
+			resp = fn(request, *a, **kw)
+			resp['Cache-Control'] = 'no-store'
+			return resp
+		return inner
+	return deco
+
+
+def _series(lang, ontime, late, leave, absent):
+	names = {k: i18n.tr(lang, 'legend.' + k) for k in ('present', 'late', 'leave', 'absent')}
+	return [{'key': k, 'name': names[k], 'data': d} for k, d in
+			(('present', ontime), ('late', late), ('leave', leave), ('absent', absent))]
+
+
+@login_required
+@allowed_users(allowed_roles=VIEWERS)
+def dash(request):
+	"""Dashboard Tabular untuk pimpinan: angka total, ringkasan per diresaun, dan paling sering terlambat."""
+	lang = _lang(request)
+	year, month = _period(request)
+	div = _division(request)
+	ov = svc.overview(svc.month_report(year, month, division=div))
+	return render(request, 'attendance/qr/dash.html', _page(
+		request, 'dash.title', ov=ov, year=year, month=month, monthname=i18n.month_name(month, lang), div=div,
+		div_id=str(div.pk) if div else '', divisions=Division.objects.order_by('name'), years=range(year - 3, year + 2),
+		months=_months(lang), active='dash', scope='dash', page_mode='tab', qs=_qs(year, month, div)))
+
+
+@login_required
+@allowed_users(allowed_roles=VIEWERS)
+def dash_chart(request):
+	lang = _lang(request)
+	year, month = _period(request)
+	div = _division(request)
+	return render(request, 'attendance/qr/dash_chart.html', _page(
+		request, 'dash.title', year=year, month=month, monthname=i18n.month_name(month, lang), div=div,
+		div_id=str(div.pk) if div else '', divisions=Division.objects.order_by('name'), years=range(year - 3, year + 2),
+		months=_months(lang), active='dash', scope='dash', page_mode='chart', qs=_qs(year, month, div),
+		api_url=reverse('qr-api-dash') + '?' + _qs(year, month, div)))
+
+
+@_api(VIEWERS)
+def api_dash(request):
+	lang = _lang(request)
+	year, month = _period(request)
+	ov = svc.overview(svc.month_report(year, month, division=_division(request)))
+	divs, daily = ov['divisions'], ov['daily']
+	minus = lambda a, b: [None if x is None else x - y for x, y in zip(a, b)]
+	return JsonResponse({
+		'divisions': {'label': [d['name'] for d in divs], 'series': _series(
+			lang, [d['present'] - d['late'] for d in divs], [d['late'] for d in divs],
+			[d['leave'] for d in divs], [d['absent'] for d in divs])},
+		'daily': {'label': daily['label'], 'series': _series(
+			lang, minus(daily['present'], daily['late']), daily['late'], daily['leave'], daily['absent'])},
+		'late_top': {'label': [r['employee']['name'] for r in ov['late_top']], 'series': [
+			{'key': 'late', 'name': i18n.tr(lang, 'legend.late'), 'data': [r['totals']['late'] for r in ov['late_top']]}]},
+	})
+
+
+_STATUS_FILTERS = {
+	'present': lambda c: c['code'] == 'P', 'late': lambda c: c['code'] == 'P' and c['late'],
+	'leave': lambda c: c['code'] == 'L', 'absent': lambda c: c['code'] == 'F',
+	'early': lambda c: c['early'], 'noout': lambda c: c['no_out'],
+}
+
+
+def _day_rows(lang, rep_row, month, today, status):
+	"""Baris harian untuk daftar: akhir pekan dan hari yang belum datang dilewati; libur tampil abu-abu.
+	Hari ini tetap tampil (status "Belum") walau belum ada scan."""
+	wd = i18n.weekday_short(lang)
+	out = []
+	for c in rep_row['cells']:
+		if c['code'] == 'W' or c['date'] > today or (status and not _STATUS_FILTERS[status](c)):
+			continue
+		if c['code'] == 'P':
+			kind, text = ('late' if c['late'] else 'present'), i18n.tr(lang, 'legend.late' if c['late'] else 'legend.present')
+		elif c['code'] == 'L':
+			kind, text = 'leave', i18n.tr(lang, 'legend.leave')
+		elif c['code'] == 'F':
+			kind, text = 'absent', i18n.tr(lang, 'legend.absent')
+		elif c['code'] == 'H':
+			kind, text = 'holiday', c['holiday'] or i18n.tr(lang, 'day.holiday')
+		else:
+			kind, text = 'pending', i18n.tr(lang, 'day.pending' if c['date'] >= today else 'day.none')
+		out.append({'c': c, 'kind': kind, 'text': text, 'date_text': '%s %02d/%02d' % (wd[c['wd']], c['day'], month)})
+	return out
+
+
 @login_required
 @allowed_users(allowed_roles=EVERYONE)
 def my_attendance(request):
+	"""Laporan Tabular pegawai: angka ringkas yang bisa diklik dan daftar harian."""
 	lang = _lang(request)
-	link = EmployeeUser.objects.filter(user=request.user).select_related('employee').first()
+	emp = _linked(request)
 	year, month = _period(request)
-	rep = svc.month_report(year, month, employee=link.employee) if link else None
+	today = _local_today()
+	rep = svc.month_report(year, month, employee=emp) if emp else None
+	row = rep['rows'][0] if rep and rep['rows'] else None
+	status = request.GET.get('status', '')
+	status = status if status in _STATUS_FILTERS else ''
 	return render(request, 'attendance/qr/me.html', _page(
-		request, 'me.title', rep=rep, row=rep['rows'][0] if rep and rep['rows'] else None,
-		year=year, month=month, monthname=i18n.month_name(month, lang), today=_local_today(),
-		years=range(year - 3, year + 2), months=_months(lang), active='me'))
+		request, 'me.title', rep=rep, row=row, days=_day_rows(lang, row, month, today, status) if row else [],
+		status=status, status_text=i18n.tr(lang, 'tile.' + status) if status else '',
+		year=year, month=month, monthname=i18n.month_name(month, lang), today=today,
+		years=range(year - 3, year + 2), months=_months(lang), active='me', scope='me', page_mode='tab',
+		qs=_qs(year, month), wd_short=i18n.weekday_short(lang)))
+
+
+@login_required
+@allowed_users(allowed_roles=EVERYONE)
+def my_chart(request):
+	lang = _lang(request)
+	emp = _linked(request)
+	year, month = _period(request)
+	return render(request, 'attendance/qr/me_chart.html', _page(
+		request, 'me.title', linked=bool(emp), year=year, month=month, monthname=i18n.month_name(month, lang),
+		years=range(year - 3, year + 2), months=_months(lang), active='me', scope='me', page_mode='chart',
+		qs=_qs(year, month), api_url=reverse('qr-api-me') + '?' + _qs(year, month)))
+
+
+@_api(EVERYONE)
+def api_me(request):
+	"""Data grafik pegawai: hanya milik pegawai yang tertaut ke akun ini (tidak menerima id dari klien)."""
+	lang = _lang(request)
+	emp = _linked(request)
+	if not emp:
+		return JsonResponse({'error': 'unlinked'}, status=404)
+	year, month = _period(request)
+	months = svc.year_summary(emp, year)
+	col = lambda key: [t[key] for t in months]
+	ontime = [t['present'] - t['late'] for t in months]
+	cur = months[month - 1]
+	keys = ['present', 'late', 'leave', 'absent']
+	return JsonResponse({
+		'year': {'label': i18n.month_short(lang), 'series': _series(lang, ontime, col('late'), col('leave'), col('absent'))},
+		'status': {'label': [i18n.tr(lang, 'legend.' + k) for k in keys], 'keys': keys,
+				   'obj': [cur['present'] - cur['late'], cur['late'], cur['leave'], cur['absent']]},
+	})

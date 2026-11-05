@@ -1,0 +1,4 @@
+<div class="qr-cal" aria-hidden="true">
+	{% for w in wd_short %}<i class="qr-cal-h">{{ w }}</i>{% endfor %}
+	{% for week in r.weeks %}{% for c in week %}{% if c %}<span class="qr-cal-c{% if c.code %} rp-{{ c.code }}{% endif %}{% if c.late %} late{% endif %}{% if c.no_out %} f-noout{% elif c.early %} f-early{% endif %}">{{ c.day }}</span>{% else %}<span class="qr-cal-e"></span>{% endif %}{% endfor %}{% endfor %}
+</div>

@@ -1,0 +1,45 @@
+{% extends 'attendance/qr/base.html' %}
+{% load qr_i18n %}
+{% block qr_body %}
+{% include 'attendance/qr/_subtabs.html' %}
+{% include 'attendance/qr/_period_form.html' with show_div=True %}
+<h3 align="center" class="qr-h">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
+<p class="text-center text-muted">{% if div %}{{ div.name }}{% else %}{% t 'rep.all' %}{% endif %}</p>
+<div class="qr-tiles">
+	<div class="qr-tile"><b>{{ ov.totals.employees }}</b><span>{% t 'tile.total' %}</span></div>
+	<div class="qr-tile ok"><b>{{ ov.totals.present }}</b><span>{% t 'dash.t_present' %}</span></div>
+	<div class="qr-tile warn"><b>{{ ov.totals.late }}</b><span>{% t 'dash.t_late' %}</span></div>
+	<div class="qr-tile leave"><b>{{ ov.totals.leave }}</b><span>{% t 'dash.t_leave' %}</span></div>
+	<div class="qr-tile bad"><b>{{ ov.totals.absent }}</b><span>{% t 'dash.t_absent' %}</span></div>
+	<div class="qr-tile"><b>{% if ov.totals.rate is None %}–{% else %}{{ ov.totals.rate }}%{% endif %}</b><span>{% t 'dash.t_rate' %}</span></div>
+</div>
+<h5>{% t 'dash.div_table' %}</h5>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.division' %}</th><th>{% t 'tile.total' %}</th><th>{% t 'th.present' %}</th><th>{% t 'th.late' %}</th><th>{% t 'th.leave' %}</th><th>{% t 'th.absent' %}</th><th>{% t 'th.rate' %}</th></tr></thead>
+	<tbody>
+	{% for d in ov.divisions %}
+		<tr>
+			<td data-label="{% t 'th.division' %}" class="qr-main">{% if d.id %}<a href="{% url 'qr-report' %}?year={{ year }}&month={{ month }}&div={{ d.id }}">{{ d.name }}</a>{% else %}{{ d.name }}{% endif %}</td>
+			<td data-label="{% t 'tile.total' %}">{{ d.employees }}</td>
+			<td data-label="{% t 'th.present' %}"><b>{{ d.present }}</b></td>
+			<td data-label="{% t 'th.late' %}">{{ d.late }}</td>
+			<td data-label="{% t 'th.leave' %}">{{ d.leave }}</td>
+			<td data-label="{% t 'th.absent' %}">{{ d.absent }}</td>
+			<td data-label="{% t 'th.rate' %}">{% if d.rate is None %}–{% else %}{{ d.rate }}%{% endif %}</td>
+		</tr>
+	{% empty %}<tr><td colspan="7" class="text-muted">{% t 'grid.empty' %}</td></tr>
+	{% endfor %}
+	</tbody>
+</table>
+<h5 class="mt-4">{% t 'dash.late_top' %}</h5>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.division' %}</th><th>{% t 'th.late' %}</th></tr></thead>
+	<tbody>
+	{% for r in ov.late_top %}
+		<tr><td data-label="{% t 'th.name' %}" class="qr-main">{{ r.employee.name }}</td><td data-label="{% t 'th.division' %}">{{ r.employee.division|default:"-" }}</td>
+			<td data-label="{% t 'th.late' %}"><b>{{ r.totals.late }}</b></td></tr>
+	{% empty %}<tr><td colspan="3" class="text-muted">{% t 'dash.no_late' %}</td></tr>
+	{% endfor %}
+	</tbody>
+</table>
+{% endblock %}

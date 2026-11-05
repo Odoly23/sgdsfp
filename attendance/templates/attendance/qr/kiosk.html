@@ -8,7 +8,7 @@
 </head>
 <body class="kiosk" data-scan-url="{% url 'qr-kiosk-scan' %}" data-check-url="{% url 'qr-kiosk-check' %}" data-tz="{{ tz }}" data-late="{{ late_after }}" data-end="{{ work_end }}">
 	<header class="k-top">
-		<div style="display:flex;align-items:center;gap:16px">
+		<div class="k-brand">
 			<img src="{% static 'attendance/qr/mdi-logo.jpg' %}" alt="MDI">
 			<div><h1 data-i18n="k.title">{% t 'k.title' %}</h1><small>Mata Dalan Institute</small></div>
 		</div>

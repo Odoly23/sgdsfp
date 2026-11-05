@@ -1,16 +1,18 @@
 {% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
 {% block qr_body %}
-<h3 align="center">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
+<h3 align="center" class="qr-h">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
 <p class="text-center text-muted">{% if div %}{{ div.name }}{% else %}{% t 'rep.all' %}{% endif %}</p>
-<form method="get" class="form-inline mb-3">
-	<select name="div" class="form-control form-control-sm mr-2" aria-label="{% t 'f.division' %}"><option value="">{% t 'f.all_div' %}</option>
+<form method="get" class="qr-form">
+	<select name="div" class="form-control" aria-label="{% t 'f.division' %}"><option value="">{% t 'f.all_div' %}</option>
 		{% for d in divisions %}<option value="{{ d.pk }}" {% if div_id == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>
-	<select name="month" class="form-control form-control-sm mr-2" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
-	<select name="year" class="form-control form-control-sm mr-2" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
-	<button class="btn btn-sm btn-mdi mr-2" type="submit">{% t 'f.show' %}</button>
-	<a class="btn btn-sm btn-mdi mr-1" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">{% t 'btn.csv' %} <i class="fa fa-download"></i></a>
-	<a class="btn btn-sm btn-mdi" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">{% t 'btn.xlsx' %} <i class="fa fa-file-excel-o"></i></a>
+	<select name="month" class="form-control" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+	<select name="year" class="form-control" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+	<button class="btn btn-mdi" type="submit">{% t 'f.show' %}</button>
+	<a class="btn btn-mdi" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=csv">{% t 'btn.csv' %} <i class="fa fa-download"></i></a>
+	<a class="btn btn-mdi" href="{% url 'qr-report-export' %}?year={{ year }}&month={{ month }}&div={{ div_id }}&fmt=xlsx">{% t 'btn.xlsx' %} <i class="fa fa-file-excel-o"></i></a>
 </form>
-{% include 'attendance/qr/_grid.html' with rows=rep.rows %}
+<div class="qr-legend-m d-md-none">{% include 'attendance/qr/_legend.html' %}</div>
+<div class="d-md-none">{% include 'attendance/qr/_empcards.html' with rows=rep.rows %}</div>
+<div class="d-none d-md-block">{% include 'attendance/qr/_grid.html' with rows=rep.rows %}</div>
 {% endblock %}

@@ -14,8 +14,8 @@
 			<label><input type="radio" name="side" value="back"> {% t 'cp.back' %}</label>
 		</span>
 		<span><label>{% t 'cp.card_lang' %}</label>{% flags 'js' %}</span>
-		<button onclick="window.print()" style="padding:8px 16px;border:0;border-radius:8px;background:#e3171e;color:#fff;cursor:pointer">{% t 'cp.print' %}</button>
-		<span style="color:#6f6a62;font-size:.85rem">{% t 'cp.help' %}</span>
+		<button class="cs-print" onclick="window.print()">{% t 'cp.print' %}</button>
+		<span class="cs-help">{% t 'cp.help' %}</span>
 	</div>
 	<div class="cs-wrap">
 	{% for c in items %}
@@ -45,7 +45,7 @@
 	<form method="post" action="{% url 'qr-card-action' %}" class="cs-foot">
 		{% csrf_token %}{% for i in ids %}<input type="hidden" name="ids" value="{{ i }}">{% endfor %}
 		<input type="hidden" name="action" value="printed">
-		<span>{% t 'cp.done_q' %}</span> <button type="submit" style="padding:8px 16px;border-radius:8px;border:1px solid #e3171e;background:#fff;color:#a80f14;cursor:pointer">{% t 'cp.mark' %}</button>
+		<span>{% t 'cp.done_q' %}</span> <button type="submit">{% t 'cp.mark' %}</button>
 	</form>
 	<script>
 		/* ganti bahasa kartu langsung (hanya teks pada kartu), lalu cetak sesuai bahasa yang tampil */

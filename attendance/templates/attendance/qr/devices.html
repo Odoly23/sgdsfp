@@ -10,22 +10,23 @@
 </div>
 {% endif %}
 <h5>{% t 'dev.add_title' %}</h5>
-<form method="post" action="{% url 'qr-device-add' %}" class="form-inline mb-4">{% csrf_token %}
-	<label class="mr-2" for="dev-name">{% t 'dev.name_label' %}</label>
-	<input id="dev-name" class="form-control form-control-sm mr-2" type="text" name="name" placeholder="{% t 'dev.name_ph' %}" required>
-	<button class="btn btn-sm btn-mdi" type="submit">{% t 'dev.make' %}</button>
+<form method="post" action="{% url 'qr-device-add' %}" class="qr-form mb-4">{% csrf_token %}
+	<input id="dev-name" class="form-control" type="text" name="name" aria-label="{% t 'dev.name_label' %}" placeholder="{% t 'dev.name_ph' %}" required>
+	<button class="btn btn-mdi" type="submit">{% t 'dev.make' %}</button>
 </form>
 <h5>{% t 'dev.list_title' %}</h5>
-<table class="table table-sm table-striped">
-	<thead><tr align="center"><th>{% t 'th.name' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.last_seen' %}</th><th>#</th></tr></thead>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.last_seen' %}</th><th></th></tr></thead>
 	<tbody>
 	{% for d in devices %}
-		<tr align="center"><td align="left">{{ d.name }}</td>
-			<td>{% if d.is_active %}<span class="badge badge-success">{% t 'st.active' %}</span>{% else %}<span class="badge badge-danger">{% t 'st.inactive' %}</span>{% endif %}</td>
-			<td>{% if d.last_seen %}{{ d.last_seen|date:"d/m/Y H:i" }}{% else %}{% t 'dev.never' %}{% endif %}</td>
-			<td><form method="post" action="{% url 'qr-device-toggle' d.pk %}">{% csrf_token %}
-				<button class="btn btn-sm btn-mdi" type="submit">{% if d.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td></tr>
-	{% empty %}<tr><td colspan="4" class="text-center text-muted">{% t 'dev.empty' %}</td></tr>
+		<tr>
+			<td data-label="{% t 'th.name' %}" class="qr-main">{{ d.name }}</td>
+			<td data-label="{% t 'th.status' %}">{% if d.is_active %}<span class="badge badge-success">{% t 'st.active' %}</span>{% else %}<span class="badge badge-danger">{% t 'st.inactive' %}</span>{% endif %}</td>
+			<td data-label="{% t 'th.last_seen' %}">{% if d.last_seen %}{{ d.last_seen|date:"d/m/Y H:i" }}{% else %}{% t 'dev.never' %}{% endif %}</td>
+			<td class="qr-act"><form method="post" action="{% url 'qr-device-toggle' d.pk %}">{% csrf_token %}
+				<button class="btn btn-sm btn-mdi" type="submit">{% if d.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td>
+		</tr>
+	{% empty %}<tr><td colspan="4" class="text-muted">{% t 'dev.empty' %}</td></tr>
 	{% endfor %}
 	</tbody>
 </table>

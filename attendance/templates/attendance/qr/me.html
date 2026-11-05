@@ -1,23 +1,46 @@
 {% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
 {% block qr_body %}
-<h3 align="center">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
 {% if not rep %}
 	<div class="alert alert-warning p-2">{% t 'me.unlinked' %}</div>
 {% else %}
-	<form method="get" class="form-inline mb-3 justify-content-center">
-		<select name="month" class="form-control form-control-sm mr-2" aria-label="{% t 'f.month' %}">{% for n, name in months %}<option value="{{ n }}" {% if n == month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
-		<select name="year" class="form-control form-control-sm mr-2" aria-label="{% t 'f.year' %}">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
-		<button class="btn btn-sm btn-mdi" type="submit">{% t 'f.show' %}</button>
-	</form>
+	{% include 'attendance/qr/_subtabs.html' %}
+	{% include 'attendance/qr/_period_form.html' %}
+	<h3 align="center" class="qr-h">{% t 'rep.heading' month=monthname|upper year=year %}</h3>
 	{% if row %}
-	<div class="row text-center mb-3">
-		<div class="col-sm"><div class="qr-stat border-success"><h3 class="mb-0 text-success">{{ row.totals.present }}</h3><small>{% t 'tile.present' %}</small></div></div>
-		<div class="col-sm"><div class="qr-stat border-warning"><h3 class="mb-0 text-warning">{{ row.totals.late }}</h3><small>{% t 'tile.late' %}</small></div></div>
-		<div class="col-sm"><div class="qr-stat border-info"><h3 class="mb-0 text-info">{{ row.totals.leave }}</h3><small>{% t 'tile.leave' %}</small></div></div>
-		<div class="col-sm"><div class="qr-stat border-danger"><h3 class="mb-0 text-danger">{{ row.totals.absent }}</h3><small>{% t 'tile.absent' %}</small></div></div>
+	<p class="text-center text-muted">{{ row.employee.name }}{% if row.employee.position %} · {{ row.employee.position }}{% endif %}</p>
+	<div class="qr-tiles">
+		<a class="qr-tile ok{% if status == 'present' %} on{% endif %}" href="?{{ qs }}&status=present"><b>{{ row.totals.present }}</b><span>{% t 'tile.present' %}</span></a>
+		<a class="qr-tile warn{% if status == 'late' %} on{% endif %}" href="?{{ qs }}&status=late"><b>{{ row.totals.late }}</b><span>{% t 'tile.late' %}</span></a>
+		<a class="qr-tile leave{% if status == 'leave' %} on{% endif %}" href="?{{ qs }}&status=leave"><b>{{ row.totals.leave }}</b><span>{% t 'tile.leave' %}</span></a>
+		<a class="qr-tile bad{% if status == 'absent' %} on{% endif %}" href="?{{ qs }}&status=absent"><b>{{ row.totals.absent }}</b><span>{% t 'tile.absent' %}</span></a>
+		<a class="qr-tile warn{% if status == 'early' %} on{% endif %}" href="?{{ qs }}&status=early"><b>{{ row.totals.early }}</b><span>{% t 'tile.early' %}</span></a>
+		<a class="qr-tile{% if status == 'noout' %} on{% endif %}" href="?{{ qs }}&status=noout"><b>{{ row.totals.no_out }}</b><span>{% t 'tile.noout' %}</span></a>
 	</div>
+	<div class="qr-emp qr-emp-solo mb-3">{% include 'attendance/qr/_cal.html' with r=row %}</div>
+	<div class="qr-listhead">
+		<h5 class="mb-0">{% t 'me.days' %}</h5>
+		{% if status %}<a class="btn btn-sm btn-mdi" href="?{{ qs }}">{% t 'me.filter' status=status_text %} ✕</a>{% endif %}
+	</div>
+	<table class="table table-sm table-striped qr-stack">
+		<thead><tr><th>{% t 'th.date' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.in' %}</th><th>{% t 'th.out' %}</th><th>{% t 'th.note' %}</th></tr></thead>
+		<tbody>
+		{% for d in days %}
+			<tr class="qr-day-{{ d.kind }}">
+				<td data-label="{% t 'th.date' %}" class="qr-main">{{ d.date_text }}</td>
+				<td data-label="{% t 'th.status' %}"><span class="qr-st qr-st-{{ d.kind }}">{{ d.text }}</span></td>
+				<td data-label="{% t 'th.in' %}">{{ d.c.in|default:"–" }}</td>
+				<td data-label="{% t 'th.out' %}">{{ d.c.out|default:"–" }}</td>
+				<td data-label="{% t 'th.note' %}">
+					{% if d.c.late %}<span class="badge badge-warning">{% t 'chip.late' %}</span>{% endif %}
+					{% if d.c.early %}<span class="badge badge-warning">{% t 'chip.early' %}</span>{% endif %}
+					{% if d.c.no_out %}<span class="badge badge-secondary">{% t 'tile.noout' %}</span>{% endif %}
+				</td>
+			</tr>
+		{% empty %}<tr><td colspan="5" class="text-muted">{% t 'me.empty' %}</td></tr>
+		{% endfor %}
+		</tbody>
+	</table>
 	{% endif %}
-	{% include 'attendance/qr/_grid.html' with rows=rep.rows %}
 {% endif %}
 {% endblock %}

@@ -1,0 +1,4 @@
+{% load qr_i18n %}{% comment %}
+	Tombol besar di Varanda (home) untuk membuka laporan absensi:
+	{% include 'attendance/qr/_home_button.html' %}
+{% endcomment %}<a class="btn btn-mdi btn-block mb-2 py-3" style="background:#e3171e;border-color:#e3171e;color:#fff;font-weight:600" href="{% qr_tab_url %}"><i class="fa fa-qrcode"></i> {% t 'nav.myreport' %}</a>

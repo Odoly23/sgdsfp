@@ -1,0 +1,22 @@
+{% extends 'attendance/qr/base.html' %}
+{% load static qr_i18n %}
+{% block qr_body %}
+{% if not linked %}
+	<div class="alert alert-warning p-2">{% t 'me.unlinked' %}</div>
+{% else %}
+	{% include 'attendance/qr/_subtabs.html' %}
+	{% include 'attendance/qr/_period_form.html' %}
+	<div class="qr-charts" data-url="{{ api_url }}" data-na="{% t 'dash.chart_na' %}" data-empty="{% t 'grid.empty' %}" data-empty-late="{% t 'dash.no_late' %}">
+		<div class="row">
+			<div class="col-lg-8">{% t 'me.year_chart' year=year as t1 %}{% include 'attendance/qr/_chart.html' with title=t1 part='year' kind='column' %}</div>
+			<div class="col-lg-4">{% t 'me.status_chart' as t2 %}{% include 'attendance/qr/_chart.html' with title=t2 part='status' kind='pie' %}</div>
+		</div>
+	</div>
+{% endif %}
+{% endblock %}
+{% block qr_scripts %}
+{% if linked %}
+<script src="{% static 'main/js_custom/highcharts.js' %}"></script>
+<script src="{% static 'attendance/qr/charts.js' %}"></script>
+{% endif %}
+{% endblock %}

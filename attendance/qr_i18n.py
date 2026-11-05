@@ -42,6 +42,14 @@ WEEKDAYS = {
 }
 
 
+def weekday_short(lang):
+	return [w[:3] for w in WEEKDAYS[norm(lang)]]
+
+
+def month_short(lang):
+	return [m[:3] for m in MONTHS[norm(lang)]]
+
+
 def month_name(month, lang):
 	return MONTHS[norm(lang)][month - 1]
 
@@ -330,6 +338,38 @@ MESSAGES = {
 	'grid.out': ('Sai', 'Out', 'Pulang', 'Saída'),
 	'csv.noout': ('Seidauk scan sai', 'No check-out', 'Belum scan pulang', 'Sem saída'),
 	'csv.early': ('Sai sedu', 'Left early', 'Pulang awal', 'Saída antecipada'),
+	# ---------------------------------------------------------------- laporan / dashboard
+	'nav.dash': ('Dashboard absensia', 'Attendance dashboard', 'Dasbor absensi', 'Painel de assiduidade'),
+	'nav.myreport': ('Relatoriu absensia', 'Attendance report', 'Laporan absensi', 'Relatório de assiduidade'),
+	'menu.report': ('RELATORIU', 'REPORTS', 'LAPORAN', 'RELATÓRIOS'),
+	'nav.tab': ('Tabular', 'Tabular', 'Tabular', 'Tabular'),
+	'nav.chart': ('Grafiku', 'Charts', 'Grafik', 'Gráficos'),
+	'dash.title': ('Dashboard relatoriu absensia', 'Attendance report dashboard', 'Dasbor laporan absensi', 'Painel de relatórios de assiduidade'),
+	'dash.t_present': ('Loron presensa', 'Days present', 'Hari hadir', 'Dias de presença'),
+	'dash.t_late': ('Loron tardi', 'Late days', 'Hari terlambat', 'Dias com atraso'),
+	'dash.t_leave': ('Loron lisensa', 'Leave days', 'Hari cuti', 'Dias de licença'),
+	'dash.t_absent': ('Loron falta', 'Absent days', 'Hari alpha', 'Dias de falta'),
+	'dash.t_rate': ('Taxa presensa', 'Attendance rate', 'Tingkat kehadiran', 'Taxa de assiduidade'),
+	'dash.by_div': ('Absensia tuir diresaun', 'Attendance by division', 'Absensi per divisi', 'Assiduidade por direção'),
+	'dash.daily': ('Tendénsia loron-loron', 'Daily trend', 'Tren harian', 'Tendência diária'),
+	'dash.late_top': ('Funsionáriu tardi barak liu', 'Most frequently late', 'Paling sering terlambat', 'Mais atrasos'),
+	'dash.div_table': ('Rezumu tuir diresaun', 'Summary by division', 'Ringkasan per divisi', 'Resumo por direção'),
+	'dash.chart_na': ('Gráfiku la disponivel (Highcharts seidauk karga).', 'Charts unavailable (Highcharts is not loaded).',
+		'Grafik tidak tersedia (Highcharts belum dimuat).', 'Gráficos indisponíveis (Highcharts não carregado).'),
+	'dash.no_late': ('La iha funsionáriu tardi.', 'Nobody was late.', 'Tidak ada yang terlambat.', 'Ninguém se atrasou.'),
+	'th.rate': ('Taxa', 'Rate', 'Tingkat', 'Taxa'),
+	'th.date': ('Data', 'Date', 'Tanggal', 'Data'),
+	'tile.early': ('Sai sedu', 'Left early', 'Pulang awal', 'Saída antecipada'),
+	'tile.noout': ('Seidauk scan sai', 'No check-out', 'Belum scan pulang', 'Sem saída'),
+	'me.days': ('Lista loron-loron', 'Daily list', 'Daftar harian', 'Lista diária'),
+	'me.year_chart': ('Absensia tinan {year}', 'Attendance in {year}', 'Absensi tahun {year}', 'Assiduidade em {year}'),
+	'me.status_chart': ('Status fulan ne\'e', 'Status this month', 'Status bulan ini', 'Estado deste mês'),
+	'me.filter': ('Filtru: {status}', 'Filter: {status}', 'Filter: {status}', 'Filtro: {status}'),
+	'me.clear': ('Hamoos filtru', 'Clear filter', 'Hapus filter', 'Limpar filtro'),
+	'me.empty': ('La iha loron ne\'ebé loos ho filtru ne\'e.', 'No days match this filter.', 'Tidak ada hari yang cocok dengan filter ini.', 'Nenhum dia corresponde a este filtro.'),
+	'day.holiday': ('Feriadu', 'Holiday', 'Libur', 'Feriado'),
+	'day.pending': ('Seidauk', 'Pending', 'Belum', 'Pendente'),
+	'day.none': ('La iha dadus', 'No record', 'Tidak ada data', 'Sem registo'),
 	'me.title': ('Ha\'u nia absensia', 'My attendance', 'Absensi saya', 'A minha assiduidade'),
 	'me.unlinked': ('Ita-nia konta seidauk liga ba dadus funsionáriu. Kontaktu administradór.', 'Your account is not linked to an employee record. Contact the admin.',
 		'Akun Anda belum dihubungkan ke data pegawai. Hubungi admin.', 'A sua conta ainda não está associada a um funcionário. Contacte o administrador.'),

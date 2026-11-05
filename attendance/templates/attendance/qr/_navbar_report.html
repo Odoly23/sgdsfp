@@ -1,0 +1,12 @@
+{% load qr_i18n %}{% comment %}
+	Menu RELATORIU (Tabular / Grafiku) untuk navbar semua grup. Tempel di adm.html, staff.html, prezident.html,
+	funsionario.html sebelum menu profil:
+	{% include 'attendance/qr/_navbar_report.html' %}
+	Pimpinan (admin/staff/president) diarahkan ke dashboard seluruh pegawai; pegawai ke laporannya sendiri.
+{% endcomment %}<li class="nav-item dropdown active">
+	<a class="nav-link dropdown-toggle" href="#" id="dropdownQR" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><i class="fa fa-bar-chart"></i> {% t 'menu.report' %}</a>
+	<div class="dropdown-menu" aria-labelledby="dropdownQR">
+		<a class="dropdown-item" href="{% qr_tab_url %}"><i class="fa fa-list"></i> {% t 'nav.tab' %}</a>
+		<a class="dropdown-item" href="{% qr_chart_url %}"><i class="fa fa-bar-chart"></i> {% t 'nav.chart' %}</a>
+	</div>
+</li>

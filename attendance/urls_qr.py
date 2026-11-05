@@ -19,7 +19,13 @@ urlpatterns = [
 	path('cards/print/', v.card_print, name="qr-card-print"),
 	path('cards/action/', v.card_action, name="qr-card-action"),
 
+	path('dash/', v.dash, name="qr-dash"),
+	path('dash/chart/', v.dash_chart, name="qr-dash-chart"),
+	path('api/dash/', v.api_dash, name="qr-api-dash"),
+
 	path('report/', v.report, name="qr-report"),
 	path('report/export/', v.report_export, name="qr-report-export"),
 	path('me/', v.my_attendance, name="qr-me"),
+	path('me/chart/', v.my_chart, name="qr-me-chart"),
+	path('api/me/', v.api_me, name="qr-api-me"),
 ]

@@ -1,0 +1,18 @@
+{% load qr_i18n %}
+<div class="qr-empcards">
+{% for r in rows %}
+	<div class="qr-emp">
+		<div class="qr-emp-head">
+			<div><b>{{ r.employee.name }}</b><small>{{ r.employee.position }}{% if r.employee.division %} · {{ r.employee.division }}{% endif %}</small></div>
+			<div class="qr-emp-tot">
+				<span class="badge badge-success" title="{% t 'th.present' %}">{{ r.totals.present }}</span>
+				<span class="badge badge-warning" title="{% t 'th.late' %}">{{ r.totals.late }}</span>
+				<span class="badge badge-info" title="{% t 'th.leave' %}">{{ r.totals.leave }}</span>
+				<span class="badge badge-danger" title="{% t 'th.absent' %}">{{ r.totals.absent }}</span>
+			</div>
+		</div>
+		{% include 'attendance/qr/_cal.html' %}
+	</div>
+{% empty %}<p class="text-muted">{% t 'grid.empty' %}</p>
+{% endfor %}
+</div>

@@ -1,48 +1,50 @@
 {% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
 {% block qr_body %}
-<h3 align="center">{{ date_text|upper }}</h3>
+<h3 align="center" class="qr-h">{{ date_text|upper }}</h3>
 <p class="text-center text-muted">{% t 'today.refresh' %}</p>
 {% if off_text %}<div class="alert alert-warning p-2">{% t 'today.off' reason=off_text %}</div>{% endif %}
-<div class="row text-center mb-3">
-	<div class="col-sm"><div class="qr-stat border-success"><h3 class="mb-0 text-success">{{ stats.scanned }}</h3><small>{% t 'tile.scanned' %}</small></div></div>
-	<div class="col-sm"><div class="qr-stat border-warning"><h3 class="mb-0 text-warning">{{ stats.late }}</h3><small>{% t 'tile.late' %}</small></div></div>
-	<div class="col-sm"><div class="qr-stat border-info"><h3 class="mb-0 text-info">{{ stats.leave }}</h3><small>{% t 'tile.leave' %}</small></div></div>
-	<div class="col-sm"><div class="qr-stat border-secondary"><h3 class="mb-0 text-secondary">{{ stats.waiting }}</h3><small>{% t 'tile.waiting' %}</small></div></div>
-	<div class="col-sm"><div class="qr-stat"><h3 class="mb-0">{{ stats.total }}</h3><small>{% t 'tile.total' %}</small></div></div>
+<div class="qr-tiles">
+	<div class="qr-tile ok"><b>{{ stats.scanned }}</b><span>{% t 'tile.scanned' %}</span></div>
+	<div class="qr-tile warn"><b>{{ stats.late }}</b><span>{% t 'tile.late' %}</span></div>
+	<div class="qr-tile leave"><b>{{ stats.leave }}</b><span>{% t 'tile.leave' %}</span></div>
+	<div class="qr-tile"><b>{{ stats.waiting }}</b><span>{% t 'tile.waiting' %}</span></div>
+	<div class="qr-tile"><b>{{ stats.total }}</b><span>{% t 'tile.total' %}</span></div>
 </div>
 <h5>{% t 'today.t1' %}</h5>
-<div class="table-responsive">
-<table class="table table-sm table-striped">
-	<thead><tr align="center"><th>{% t 'th.name' %}</th><th>{% t 'th.division' %}</th><th>{% t 'th.in' %}</th><th>{% t 'th.out' %}</th><th>{% t 'th.note' %}</th></tr></thead>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.division' %}</th><th>{% t 'th.in' %}</th><th>{% t 'th.out' %}</th><th>{% t 'th.note' %}</th></tr></thead>
 	<tbody>
 	{% for it in items %}
-		<tr align="center">
-			<td align="left">{{ it.att.employee }}</td><td>{{ it.att.div.name|default:"-" }}</td>
-			<td>{{ it.in }}</td><td>{{ it.out|default:"-" }}</td>
-			<td>
+		<tr>
+			<td data-label="{% t 'th.name' %}" class="qr-main">{{ it.att.employee }}</td>
+			<td data-label="{% t 'th.division' %}">{{ it.att.div.name|default:"-" }}</td>
+			<td data-label="{% t 'th.in' %}">{{ it.in }}</td>
+			<td data-label="{% t 'th.out' %}">{{ it.out|default:"–" }}</td>
+			<td data-label="{% t 'th.note' %}">
 				{% if it.att.scantime.is_late %}<span class="badge badge-warning">{% t 'chip.late' %}</span>{% else %}<span class="badge badge-success">{% t 'chip.ontime' %}</span>{% endif %}
 				{% if it.early %}<span class="badge badge-warning">{% t 'chip.early' %}</span>{% endif %}
 			</td>
 		</tr>
-	{% empty %}<tr><td colspan="5" class="text-center text-muted">{% t 'today.empty' %}</td></tr>
+	{% empty %}<tr><td colspan="5" class="text-muted">{% t 'today.empty' %}</td></tr>
 	{% endfor %}
 	</tbody>
 </table>
-</div>
 <h5 class="mt-4">{% t 'today.t2' %}</h5>
-<div class="table-responsive">
-<table class="table table-sm table-striped">
-	<thead><tr align="center"><th>{% t 'th.time' %}</th><th>{% t 'th.person' %}</th><th>{% t 'th.result' %}</th><th>{% t 'th.message' %}</th><th>{% t 'th.device' %}</th></tr></thead>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.time' %}</th><th>{% t 'th.person' %}</th><th>{% t 'th.result' %}</th><th>{% t 'th.message' %}</th><th>{% t 'th.device' %}</th></tr></thead>
 	<tbody>
 	{% for l in logs %}
-		<tr align="center"><td>{{ l.local }}</td><td>{% if l.employee %}{{ l.employee }}{% else %}{% t 'today.unknown' %}{% endif %}</td>
-			<td><span class="badge {% if l.code == 'duplicate' or l.code == 'already_in' %}badge-secondary{% else %}badge-danger{% endif %}">{{ l.label }}</span></td>
-			<td align="left">{{ l.message }}</td><td>{{ l.device|default:"-" }}</td></tr>
-	{% empty %}<tr><td colspan="5" class="text-center text-muted">{% t 'none' %}</td></tr>
+		<tr>
+			<td data-label="{% t 'th.time' %}" class="qr-main">{{ l.local }}</td>
+			<td data-label="{% t 'th.person' %}">{% if l.employee %}{{ l.employee }}{% else %}{% t 'today.unknown' %}{% endif %}</td>
+			<td data-label="{% t 'th.result' %}"><span class="badge {% if l.code == 'duplicate' or l.code == 'already_in' %}badge-secondary{% else %}badge-danger{% endif %}">{{ l.label }}</span></td>
+			<td data-label="{% t 'th.message' %}">{{ l.message }}</td>
+			<td data-label="{% t 'th.device' %}">{{ l.device|default:"-" }}</td>
+		</tr>
+	{% empty %}<tr><td colspan="5" class="text-muted">{% t 'none' %}</td></tr>
 	{% endfor %}
 	</tbody>
 </table>
-</div>
 {% endblock %}
 {% block qr_scripts %}<script>setTimeout(function(){ location.reload(); }, 30000);</script>{% endblock %}

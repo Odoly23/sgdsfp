@@ -1,0 +1,5 @@
+{% load qr_i18n %}{% if scope %}
+<div class="qr-subtabs" role="tablist">
+	<a role="tab" class="{% if page_mode == 'tab' %}on{% endif %}" href="{% if scope == 'dash' %}{% url 'qr-dash' %}{% else %}{% url 'qr-me' %}{% endif %}?{{ qs }}"><i class="fa fa-table"></i> {% t 'nav.tab' %}</a>
+	<a role="tab" class="{% if page_mode == 'chart' %}on{% endif %}" href="{% if scope == 'dash' %}{% url 'qr-dash-chart' %}{% else %}{% url 'qr-me-chart' %}{% endif %}?{{ qs }}"><i class="fa fa-bar-chart"></i> {% t 'nav.chart' %}</a>
+</div>{% endif %}
