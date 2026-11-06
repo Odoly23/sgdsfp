@@ -1,2 +1,4 @@
-qrcode>=7.4   # QR dalam bentuk SVG (tidak butuh Pillow)
-openpyxl>=3.1  # opsional: unduh rekap .xlsx (CSV tetap jalan tanpa ini)
+qrcode>=7.4,<9                              # QR dalam bentuk SVG (tidak butuh Pillow); 7.4 untuk Python 3.8
+openpyxl>=3.1                               # opsional: unduh rekap .xlsx (CSV tetap jalan tanpa ini)
+tzdata                                      # basis data zona waktu (cPanel kadang tidak menyediakannya)
+backports.zoneinfo; python_version < "3.9"  # zona waktu untuk Python 3.8

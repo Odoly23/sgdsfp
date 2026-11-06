@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from employee.models import Employee
 
-__all__ = ['QRCard', 'ScanDevice', 'AttendanceTime', 'ScanLog']
+__all__ = ['QRCard', 'ScanDevice', 'AttendanceTime', 'ScanLog', 'OfficeNetwork']
 
 
 class QRCard(models.Model):
@@ -58,6 +58,20 @@ class ScanLog(models.Model):
 	class Meta:
 		ordering = ['-scanned_at']
 		indexes = [models.Index(fields=['scanned_at'])]
+
+
+
+class OfficeNetwork(models.Model):
+	"""Alamat IP publik/rentang jaringan kantor yang boleh mengirim scan. Dikelola admin dari halaman Perangkat kiosk,
+	jadi saat IP kantor berganti (IP dinamis) tidak perlu mengubah settings.py dan memulai ulang server."""
+	cidr = models.CharField(max_length=64)
+	note = models.CharField(max_length=100, blank=True)
+	is_active = models.BooleanField(default=True)
+	datetime = models.DateTimeField(null=True)
+	user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+	def __str__(self):
+		return self.cidr
 
 
 from attendance import qr_checks  # noqa: E402,F401  (mendaftarkan pemeriksaan konfigurasi: manage.py check)

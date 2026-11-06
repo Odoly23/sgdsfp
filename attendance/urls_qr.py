@@ -14,6 +14,8 @@ urlpatterns = [
 	path('devices/', v.devices, name="qr-devices"),
 	path('devices/pair/', v.device_pair, name="qr-device-pair"),
 	path('devices/<int:pk>/toggle/', v.device_toggle, name="qr-device-toggle"),
+	path('devices/net/add/', v.net_add, name="qr-net-add"),
+	path('devices/net/<int:pk>/toggle/', v.net_toggle, name="qr-net-toggle"),
 
 	path('cards/', v.cards, name="qr-cards"),
 	path('cards/print/', v.card_print, name="qr-card-print"),

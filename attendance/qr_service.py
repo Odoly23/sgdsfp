@@ -9,7 +9,10 @@ import ipaddress
 import logging
 import secrets
 import time
-from zoneinfo import ZoneInfo
+try:
+	from zoneinfo import ZoneInfo
+except ImportError:      # Python 3.8 (beberapa paket cPanel): pasang backports.zoneinfo
+	from backports.zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.cache import cache
@@ -22,7 +25,7 @@ from leave.models import Leaves
 from settings_app.utils import getnewid
 from attendance import qr_i18n
 from attendance.models import Attendance, AttendanceDiv, AttendanceStatus, NacionalHoliday, Tolerance
-from attendance.models_qr import AttendanceTime, QRCard, ScanDevice, ScanLog
+from attendance.models_qr import AttendanceTime, OfficeNetwork, QRCard, ScanDevice, ScanLog
 
 QR_PREFIX = 'MDI'
 log = logging.getLogger('attendance.qr')
@@ -48,6 +51,7 @@ _DEFAULTS = {
 	'HOLIDAY_CACHE_SECONDS': 60,   # cache daftar libur untuk jalur scan; 0 = mati
 	'MAX_BODY_BYTES': 1024,        # batas ukuran permintaan scan
 	'KIOSK_COOKIE': 'mdi_kiosk',
+	'CLIENT_IP_HEADER': None,      # mis. 'HTTP_CF_CONNECTING_IP' (Cloudflare) atau 'HTTP_X_REAL_IP'; hanya bila front-end tepercaya
 	'MANAGER_GROUPS': ['admin', 'staff'],
 	'VIEWER_GROUPS': ['admin', 'staff', 'president'],
 	'DEVICE_GROUPS': ['admin'],
@@ -121,28 +125,65 @@ def parse_payload(raw):
 _PROXY_HEADERS = ('HTTP_X_FORWARDED_FOR', 'HTTP_FORWARDED', 'HTTP_X_REAL_IP')
 
 
+def _parse_ip(text):
+	try:
+		return ipaddress.ip_address((text or '').strip())
+	except ValueError:
+		return None
+
+
+def _is_local(addr):
+	"""Alamat privat/loopback (daftar PRIVATE_NETS): koneksi datang dari mesin/jaringan lokal, mis. proxy di server yang sama."""
+	return addr is not None and _in_nets(addr, PRIVATE_NETS)
+
+
 def client_ip(request):
+	"""Alamat klien yang dipakai untuk keputusan keamanan.
+	- Header khusus (ATTENDANCE_CLIENT_IP_HEADER) atau X-Forwarded-For entri paling kanan hanya dipakai bila
+	  admin menyatakan front-end tepercaya (ATTENDANCE_TRUST_PROXY_HEADER / ATTENDANCE_CLIENT_IP_HEADER).
+	- Selain itu yang dipakai REMOTE_ADDR, alamat koneksi sebenarnya (header dari klien bisa dipalsukan)."""
+	header = conf('CLIENT_IP_HEADER')
+	if header:
+		value = request.META.get(header, '')
+		return value.strip() if _parse_ip(value) else ''           # header ada tetapi tidak valid = tidak dikenal
 	if conf('TRUST_PROXY_HEADER'):
 		xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
 		if xff:
-			return xff.split(',')[-1].strip()   # entri paling kanan ditambahkan proxy tepercaya
+			return xff.split(',')[-1].strip()                       # entri paling kanan ditambahkan proxy tepercaya
 	return request.META.get('REMOTE_ADDR', '')
 
 
 def allowed_nets():
-	"""Daftar jaringan yang boleh scan; None bila sengaja dibuka (setelan [])."""
+	"""Jaringan dari settings yang boleh scan; None bila sengaja dibuka (setelan [])."""
 	nets = conf('KIOSK_ALLOWED_IPS')
 	return list(nets) if nets else None
 
 
-def ip_allowed(ip):
-	nets = allowed_nets()
-	if nets is None:
-		return True
+def office_networks():
+	"""Jaringan kantor yang didaftarkan admin di halaman Perangkat kiosk (cache pendek)."""
+	value = cache.get('attqr:offnets')
+	if value is None:
+		value = list(OfficeNetwork.objects.filter(is_active=True).values_list('cidr', flat=True))
+		cache.set('attqr:offnets', value, 60)
+	return value
+
+
+def forget_office_networks():
+	cache.delete('attqr:offnets')
+
+
+def broad_net_error(text):
+	"""Validasi jaringan yang dimasukkan admin: (cidr, None) bila baik, (None, alasan) bila salah atau terlalu luas."""
 	try:
-		addr = ipaddress.ip_address(ip)
+		net = ipaddress.ip_network((text or '').strip(), strict=False)
 	except ValueError:
-		return False
+		return None, 'invalid'
+	if net.prefixlen < (16 if net.version == 4 else 48):
+		return None, 'broad'                                        # mencegah tidak sengaja membuka satu benua ("0.0.0.0/0")
+	return str(net), None
+
+
+def _in_nets(addr, nets):
 	for net in nets:
 		try:
 			if addr in ipaddress.ip_network(net, strict=False):
@@ -152,15 +193,27 @@ def ip_allowed(ip):
 	return False
 
 
+def ip_allowed(ip):
+	nets = allowed_nets()
+	if nets is None:
+		return True
+	addr = _parse_ip(ip)
+	if addr is None:
+		return False
+	return _in_nets(addr, nets) or _in_nets(addr, office_networks())
+
+
 def network_ok(request):
-	"""Jaringan kantor saja. Bila ada header proxy tetapi proxy tidak dipercaya, alamat asli tidak diketahui:
-	ditolak (gagal-aman), dan admin diberi tahu lewat log."""
+	"""Jaringan kantor saja. Gagal-aman: bila koneksi datang dari proxy lokal (REMOTE_ADDR privat) yang membawa header
+	proxy tetapi proxy tidak dipercaya, alamat asli klien tidak diketahui, jadi ditolak dan admin diberi tahu lewat log.
+	Bila REMOTE_ADDR publik (tanpa proxy lokal, mis. Passenger/LiteSpeed langsung), header dari klien diabaikan saja."""
 	if allowed_nets() is None:
 		return True
-	if not conf('TRUST_PROXY_HEADER') and any(h in request.META for h in _PROXY_HEADERS):
+	trusted = conf('TRUST_PROXY_HEADER') or conf('CLIENT_IP_HEADER')
+	if not trusted and any(h in request.META for h in _PROXY_HEADERS) and _is_local(_parse_ip(request.META.get('REMOTE_ADDR'))):
 		if cache.add('attqr:proxywarn', 1, 600):
-			log.warning('Scan ditolak: ada header proxy tetapi ATTENDANCE_TRUST_PROXY_HEADER=False. '
-						'Set True bila server di belakang Nginx/proxy tepercaya.')
+			log.warning('Scan ditolak: koneksi datang dari proxy lokal tetapi ATTENDANCE_TRUST_PROXY_HEADER=False. '
+						'Set True (atau ATTENDANCE_CLIENT_IP_HEADER) bila proxy/front-end Anda tepercaya.')
 		return False
 	return ip_allowed(client_ip(request))
 

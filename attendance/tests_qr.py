@@ -19,7 +19,7 @@ from custom.models import Position, Status
 from leave.models import LeaveType, Leaves
 from attendance import qr_service as svc
 from attendance.models import Attendance, AttendanceDiv, AttendanceStatus, NacionalHoliday, Tolerance, Year
-from attendance.models_qr import AttendanceTime, QRCard, ScanDevice, ScanLog
+from attendance.models_qr import AttendanceTime, OfficeNetwork, QRCard, ScanDevice, ScanLog
 
 DILI = ZoneInfo('Asia/Dili')
 MON = datetime.date(2026, 11, 9)      # Senin
@@ -1472,3 +1472,191 @@ class PerformanceTests(QRBase):
 		html = self.client.get(reverse('qr-dash-chart')).content.decode()
 		self.assertIn('<script defer src="/static/main/js_custom/highcharts.js">', html)
 		self.assertIn('defer src="/static/attendance/qr/charts.js?v=', html)
+
+
+class OfficeNetworkTests(QRBase):
+	"""VPS/cPanel: server hanya melihat IP publik kantor; admin mendaftarkannya sendiri dari halaman Perangkat kiosk."""
+	HOME = '114.4.20.10'
+	OFFICE = '203.0.113.9'
+
+	def setUp(self):
+		super().setUp()
+		u = User.objects.create_user('netadmin', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.admin = u
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		self.pair()
+
+	def scan_from(self, ip, **extra):
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			return self.post_scan({'code': self.payload}, REMOTE_ADDR=ip, **extra)
+
+	def test_public_office_ip_is_rejected_until_admin_allows_it(self):
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 403)
+		r = self.client.post(reverse('qr-net-add'), {}, REMOTE_ADDR=self.OFFICE)          # kosong = IP browser ini
+		self.assertEqual(r.status_code, 302)
+		self.assertEqual(list(OfficeNetwork.objects.values_list('cidr', flat=True)), [self.OFFICE + '/32'])
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 200)                    # langsung berlaku (cache dibersihkan)
+		Attendance.objects.all().delete()
+		self.assertEqual(self.scan_from(self.HOME).status_code, 403)                      # dari rumah tetap gagal
+		self.assertEqual(self.scan_from('203.0.113.10').status_code, 403)                 # IP tetangga bukan kantor
+
+	def test_range_and_note(self):
+		self.client.post(reverse('qr-net-add'), {'cidr': '203.0.113.0/24', 'note': 'Kantor MDI'})
+		n = OfficeNetwork.objects.get()
+		self.assertEqual((n.cidr, n.note, n.user_id), ('203.0.113.0/24', 'Kantor MDI', self.admin.pk))
+		self.assertEqual(self.scan_from('203.0.113.77').status_code, 200)
+
+	def test_toggle_takes_effect_immediately_and_is_cached_briefly(self):
+		self.client.post(reverse('qr-net-add'), {'cidr': self.OFFICE})
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 200)
+		n = OfficeNetwork.objects.get()
+		self.client.post(reverse('qr-net-toggle', args=[n.pk]))
+		self.assertFalse(OfficeNetwork.objects.get().is_active)
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 403)
+		self.client.post(reverse('qr-net-toggle', args=[n.pk]))
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 200)
+		with CaptureQueriesContext(connection) as q:                                     # daftar jaringan di-cache
+			svc.ip_allowed(self.OFFICE)
+			svc.ip_allowed(self.OFFICE)
+		self.assertLessEqual(len(q), 0)
+
+	def test_invalid_and_too_broad_networks_are_refused(self):
+		for bad in ['0.0.0.0/0', '10.0.0.0/8', '::/0', '2001:db8::/32', 'abc', '1.2.3.4/33', '999.1.1.1', '1.2.3']:
+			self.client.post(reverse('qr-net-add'), {'cidr': bad})
+		self.assertEqual(OfficeNetwork.objects.count(), 0)
+		self.assertEqual(self.client.get(reverse('qr-devices')).status_code, 200)
+		cidr, err = svc.broad_net_error('192.168.0.0/16')
+		self.assertEqual((cidr, err), ('192.168.0.0/16', None))
+		self.assertEqual(svc.broad_net_error('192.168.1.1')[0], '192.168.1.1/32')
+		self.assertEqual(svc.broad_net_error('0.0.0.0/0')[1], 'broad')
+		self.assertEqual(svc.broad_net_error('x')[1], 'invalid')
+
+	def test_pairing_can_allow_the_office_ip_in_one_click(self):
+		self.client.post(reverse('qr-device-pair'), {'name': 'PC Pintu', 'allow_ip': '1'}, REMOTE_ADDR=self.OFFICE)
+		self.assertEqual(OfficeNetwork.objects.get().cidr, self.OFFICE + '/32')
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 200)
+
+	def test_pairing_without_checkbox_or_from_private_ip_adds_nothing(self):
+		self.client.post(reverse('qr-device-pair'), {'name': 'A'}, REMOTE_ADDR=self.OFFICE)
+		self.client.post(reverse('qr-device-pair'), {'name': 'B', 'allow_ip': '1'})          # 127.0.0.1 sudah diterima
+		self.assertEqual(OfficeNetwork.objects.count(), 0)
+
+	def test_devices_page_shows_ip_seen_by_server_and_whether_accepted(self):
+		html = self.client.get(reverse('qr-devices'), REMOTE_ADDR=self.OFFICE).content.decode()
+		self.assertIn(self.OFFICE, html)
+		self.assertIn('Belum diterima', html)
+		self.assertIn('name="allow_ip"', html)                                # tawaran izinkan sekalian saat pasangkan
+		self.client.post(reverse('qr-net-add'), {}, REMOTE_ADDR=self.OFFICE)
+		html = self.client.get(reverse('qr-devices'), REMOTE_ADDR=self.OFFICE).content.decode()
+		self.assertIn('Diterima', html)
+		self.assertNotIn('name="allow_ip"', html)
+		self.assertIn(self.OFFICE + '/32', html)
+		self.assertIn('192.168.0.0/16', html)                                 # jaringan dari settings.py ikut ditampilkan
+
+	def test_only_device_admins_manage_networks(self):
+		self.client.logout()
+		u = User.objects.create_user('staffer', password='x')
+		u.groups.add(Group.objects.get_or_create(name='staff')[0])
+		self.client.force_login(u)
+		self.assertEqual(self.client.post(reverse('qr-net-add'), {'cidr': self.OFFICE}).status_code, 403)
+		self.assertEqual(OfficeNetwork.objects.count(), 0)
+		self.client.logout()
+		self.client.force_login(self.admin)
+		self.assertEqual(self.client.get(reverse('qr-net-add')).status_code, 405)
+
+	@override_settings(ATTENDANCE_KIOSK_ALLOWED_IPS=['10.0.0.0/8'])
+	def test_settings_and_database_networks_are_combined(self):
+		OfficeNetwork.objects.create(cidr=self.OFFICE + '/32')
+		OfficeNetwork.objects.create(cidr='198.51.100.0/24', is_active=False)
+		self.assertEqual(self.scan_from('10.4.4.4').status_code, 200)
+		Attendance.objects.all().delete()
+		self.assertEqual(self.scan_from(self.OFFICE).status_code, 200)
+		self.assertEqual(self.scan_from('198.51.100.5').status_code, 403)                  # nonaktif
+		self.assertEqual(self.scan_from('192.168.1.1').status_code, 403)                   # bukan di daftar sendiri
+
+	def test_public_remote_addr_ignores_client_supplied_proxy_headers(self):
+		OfficeNetwork.objects.create(cidr=self.OFFICE + '/32')
+		# koneksi langsung dari internet (Passenger/LiteSpeed): header palsu tidak berpengaruh, tidak juga membuat ditolak
+		r = self.scan_from(self.HOME, HTTP_X_FORWARDED_FOR=self.OFFICE)
+		self.assertEqual(r.status_code, 403)
+		self.assertEqual(self.scan_from(self.OFFICE, HTTP_X_FORWARDED_FOR='1.1.1.1').status_code, 200)
+
+	@override_settings(ATTENDANCE_CLIENT_IP_HEADER='HTTP_CF_CONNECTING_IP')
+	def test_dedicated_client_ip_header_for_cloudflare(self):
+		OfficeNetwork.objects.create(cidr=self.OFFICE + '/32')
+		cf = '172.70.1.1'                                                    # alamat Cloudflare terlihat sebagai REMOTE_ADDR
+		self.assertEqual(self.scan_from(cf, HTTP_CF_CONNECTING_IP=self.OFFICE).status_code, 200)
+		Attendance.objects.all().delete()
+		self.assertEqual(self.scan_from(cf, HTTP_CF_CONNECTING_IP=self.HOME).status_code, 403)
+		self.assertEqual(self.scan_from(cf).status_code, 403)                                 # header hilang = tidak dikenal
+		self.assertEqual(self.scan_from(cf, HTTP_CF_CONNECTING_IP='bukan-ip').status_code, 403)
+		self.assertEqual(self.scan_from(cf, HTTP_CF_CONNECTING_IP='1.1.1.1, ' + self.OFFICE).status_code, 403)
+
+	def test_reverse_proxy_on_same_server_needs_explicit_trust(self):
+		OfficeNetwork.objects.create(cidr=self.OFFICE + '/32')
+		kwargs = dict(REMOTE_ADDR='127.0.0.1', HTTP_X_FORWARDED_FOR=self.OFFICE)
+		with self.assertLogs('attendance.qr', 'WARNING'):
+			self.assertEqual(self.scan_from(kwargs.pop('REMOTE_ADDR'), **kwargs).status_code, 403)    # gagal-aman
+		with override_settings(ATTENDANCE_TRUST_PROXY_HEADER=True):
+			self.assertEqual(self.scan_from('127.0.0.1', HTTP_X_FORWARDED_FOR=self.OFFICE).status_code, 200)
+
+
+class DeploymentTests(QRBase):
+	def test_python_38_syntax_and_apis(self):
+		"""cPanel sering hanya menyediakan Python 3.8/3.9: tidak boleh ada sintaks atau API yang lebih baru."""
+		import ast, pathlib, re
+		root = pathlib.Path(__file__).parent
+		banned = re.compile(r'\.removeprefix\(|\.removesuffix\(|zip\([^)]*strict=|math\.lcm|functools\.cache\b|'
+							r'\b(list|dict|set|tuple)\[[a-zA-Z]|\bmatch\s+\w+:|\|=|\)\s*\|\s*\{|:\s*\w+\s*\|\s*None')
+		for f in root.rglob('*.py'):
+			if 'migrations' in f.parts or f.name == 'tests_qr.py':
+				continue
+			src = f.read_text(encoding='utf-8')
+			ast.parse(src, filename=str(f), feature_version=(3, 8))
+			for n, line in enumerate(src.splitlines(), 1):
+				code = line.split('#')[0]
+				self.assertIsNone(banned.search(code), '%s:%d memakai fitur Python >= 3.9: %s' % (f.name, n, line.strip()))
+
+	def test_zoneinfo_has_py38_fallback(self):
+		import pathlib
+		for name in ('qr_service.py', 'qr_checks.py'):
+			src = (pathlib.Path(__file__).parent / name).read_text(encoding='utf-8')
+			self.assertIn('backports.zoneinfo', src)
+		req = (pathlib.Path(__file__).parent.parent / 'requirements-qr.txt').read_text(encoding='utf-8') if (pathlib.Path(__file__).parent.parent / 'requirements-qr.txt').exists() else ''
+		self.assertTrue(not req or 'tzdata' in req)
+
+	def test_check_warns_about_per_process_cache_in_production(self):
+		from django.core.checks import run_checks
+		locmem = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+		filebased = {'default': {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache', 'LOCATION': '/tmp/mdi_cache_test'}}
+		ids = lambda: {m.id for m in run_checks() if m.id.startswith('attendance.')}
+		with override_settings(DEBUG=False, CACHES=locmem):
+			self.assertIn('attendance.W004', ids())
+		with override_settings(DEBUG=False, CACHES=filebased):
+			self.assertNotIn('attendance.W004', ids())
+		with override_settings(DEBUG=True, CACHES=locmem):
+			self.assertNotIn('attendance.W004', ids())
+
+	def test_file_based_cache_supports_what_we_need(self):
+		"""Throttle (incr/add) dan cache laporan harus jalan di cache berbasis berkas, pilihan paling umum di cPanel."""
+		import shutil, tempfile
+		d = tempfile.mkdtemp()
+		try:
+			caches = {'default': {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache', 'LOCATION': d}}
+			with override_settings(CACHES=caches):
+				from django.core.cache import cache as fb
+				u = User.objects.create_user('fbc', password='x')
+				u.groups.add(Group.objects.get_or_create(name='admin')[0])
+				self.client.force_login(u)
+				self.pair()
+				with override_settings(ATTENDANCE_THROTTLE_PER_MINUTE=2), mock.patch.object(svc.time, 'time', lambda: 9_000.0):
+					codes = [self.post_scan({'code': 'x'}).status_code for _ in range(3)]
+				self.assertEqual(codes, [200, 200, 429])
+				a = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11}).json()
+				b = self.client.get(reverse('qr-api-dash'), {'year': 2026, 'month': 11}).json()
+				self.assertEqual(a, b)
+				self.assertTrue(fb.get('attqr:proxywarn') is None)
+		finally:
+			shutil.rmtree(d, ignore_errors=True)

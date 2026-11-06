@@ -1,7 +1,10 @@
 """Pemeriksaan konfigurasi absensi QR, tampil di `python manage.py check` dan saat server dijalankan."""
 import ipaddress
 import re
-from zoneinfo import ZoneInfo
+try:
+	from zoneinfo import ZoneInfo
+except ImportError:      # Python 3.8
+	from backports.zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.checks import Error, Warning, register
@@ -36,4 +39,10 @@ def check_attendance_qr(app_configs, **kwargs):
 	if not svc.conf('REQUIRE_DEVICE_KEY'):
 		out.append(Warning('ATTENDANCE_REQUIRE_DEVICE_KEY = False: scan tidak dikunci ke PC kiosk tertentu.',
 						   id='attendance.W003'))
+	backend = str(getattr(settings, 'CACHES', {}).get('default', {}).get('BACKEND', ''))
+	if not settings.DEBUG and 'locmem' in backend.lower():
+		out.append(Warning('Cache bawaan (LocMem) terpisah di tiap proses server, sedangkan cPanel/Passenger menjalankan beberapa proses: '
+						   'pembatas permintaan dan cache laporan tidak dibagi.',
+						   hint='Pakai django.core.cache.backends.filebased.FileBasedCache (lihat QR_INSTALL.md, bagian VPS cPanel).',
+						   id='attendance.W004'))
 	return out

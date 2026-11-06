@@ -16,7 +16,7 @@ attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
 attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
 attendance/management/commands/prune_scanlogs.py   pembersih log scan
-attendance/tests_qr.py         145 tes otomatis
+attendance/tests_qr.py         162 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -56,7 +56,8 @@ ATTENDANCE_LANG_IN_NAVBAR = False       # True setelah bendera ditempel di navba
 # ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']   # bawaan: semua jaringan privat. [] = TERBUKA (tidak aman)
 # ATTENDANCE_REQUIRE_DEVICE_KEY = True    # scan hanya dari PC yang dipasangkan admin (bawaan True)
 # ATTENDANCE_ALLOW_CAMERA = False         # kamera cadangan di kiosk (bawaan mati: hanya alat pembaca QR)
-# ATTENDANCE_TRUST_PROXY_HEADER = True    # WAJIB True bila server di belakang Nginx/proxy tepercaya
+# ATTENDANCE_TRUST_PROXY_HEADER = True    # True bila server di belakang Nginx/proxy lokal tepercaya
+# ATTENDANCE_CLIENT_IP_HEADER = 'HTTP_CF_CONNECTING_IP'   # alamat klien dari header front-end tepercaya (Cloudflare)
 # ATTENDANCE_THROTTLE_PER_MINUTE = 60     # batas scan per alamat IP per menit
 # --- kecepatan
 # ATTENDANCE_REPORT_CACHE_SECONDS = 60    # cache dashboard/rekap seluruh pegawai (0 = mati)
@@ -152,7 +153,7 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
 
 1. Colok alat pembaca QR USB ke PC pintu (mode "keyboard/HID", akhiran Enter, bawaan hampir semua alat). Tanpa driver.
 2. Di **PC pintu itu**, login sebagai `admin` → **Perangkat kiosk** → **Jadikan PC ini kiosk**. Satu klik, tanpa mengetik
-   kunci. Server membuat kunci acak, hanya sidik SHA-256-nya yang disimpan, dan kunci aslinya dititipkan ke browser PC itu
+   kunci. Di VPS/internet, biarkan kotak "Izinkan juga IP kantor ini" tercentang (lihat bagian 7). Server membuat kunci acak, hanya sidik SHA-256-nya yang disimpan, dan kunci aslinya dititipkan ke browser PC itu
    sebagai cookie `HttpOnly` (tidak bisa dibaca JavaScript, hanya terkirim ke `/attendance/qr/`).
 3. Buka `/attendance/qr/kiosk/` di browser yang sama, layar penuh (F11), lalu logout dari akun admin. Selesai: tidak
    perlu klik atau fokus. Di kiri bawah ada "Server terhubung" dan "Scanner terdeteksi" (hijau setelah scan pertama).
@@ -181,6 +182,82 @@ Ganti nilainya dengan merah MDI:
 ```
 Warna yang dipakai fitur QR: merah `#e3171e`, merah gelap `#a80f14` (untuk hover), abu perak `#b8b4aa`.
 Kalau mau topbar sedikit lebih gelap supaya teks putih lebih terbaca, pakai `#c8141a`.
+
+## 7. Deploy di VPS dengan cPanel
+
+**Hal terpenting:** di VPS, server tidak melihat alamat lokal kantor (192.168.x.x), melainkan **IP publik kantor**. Karena itu
+bawaan "hanya jaringan privat" akan menolak semua scan sampai IP publik kantor didaftarkan. Cukup sekali, dari PC kantor:
+login `admin` → **Perangkat kiosk**. Halaman itu menampilkan "IP browser ini (terlihat oleh server)" dan statusnya.
+Centang **Izinkan juga IP kantor ini** lalu klik **Jadikan PC ini kiosk**: PC dipasangkan dan IP kantor terdaftar sekaligus.
+Bila IP kantor berubah (IP dinamis), kiosk menampilkan "Di luar jaringan kantor"; ulangi dari PC kantor (30 detik) atau
+tambahkan rentang tetap dari ISP. Daftar bisa dinonaktifkan seketika. Rentang yang terlalu luas (lebih besar dari /16)
+ditolak agar tidak sengaja membuka scan ke seluruh internet.
+
+### Menyiapkan aplikasi
+1. cPanel → **Setup Python App** → Python 3.9 atau lebih baru (3.8 tetap didukung) → *Application root* folder proyek,
+   *Startup file* `passenger_wsgi.py`, *Entry point* `application`:
+   ```python
+   import os, sys
+   sys.path.insert(0, os.path.dirname(__file__))
+   os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mci_hrms.settings')      # nama folder proyek Anda saat ini; sesuaikan bila diganti
+   from mci_hrms.wsgi import application
+   ```
+2. Pasang paket (tombol *Run Pip Install* atau terminal virtualenv yang ditampilkan cPanel):
+   `pip install -r requirements.txt -r requirements-qr.txt` (memuat `tzdata` dan `backports.zoneinfo` untuk Python 3.8).
+3. Isi rahasia lewat **Environment variables** di halaman Python App, bukan di kode: `DJANGO_SECRET_KEY`,
+   `ATTENDANCE_QR_SECRET`, dan kata sandi basis data.
+4. Pengaturan produksi:
+   ```python
+   DEBUG = False
+   ALLOWED_HOSTS = ['absensi.domainanda.org']
+   CSRF_TRUSTED_ORIGINS = ['https://absensi.domainanda.org']
+   SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True          # setelah AutoSSL aktif
+   SECURE_HSTS_SECONDS = 31536000                              # setelah HTTPS terbukti jalan
+   DATABASES['default']['CONN_MAX_AGE'] = 60                   # koneksi MySQL dipakai ulang: scan lebih cepat
+   CACHES = {'default': {                                      # cache dibagi semua proses Passenger (LocMem tidak)
+       'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+       'LOCATION': '/home/USERNAME/tmp/mdi_cache', 'TIMEOUT': 300, 'OPTIONS': {'MAX_ENTRIES': 2000}}}
+   ATTENDANCE_QR_SECRET = os.environ['ATTENDANCE_QR_SECRET']
+   ```
+   Buat folder cache: `mkdir -p ~/tmp/mdi_cache && chmod 700 ~/tmp/mdi_cache`. Pembatas permintaan dan cache laporan
+   bekerja di cache berbasis berkas ini (sudah diuji). `python manage.py check` memberi peringatan bila cache masih LocMem.
+5. `python manage.py migrate && python manage.py collectstatic --noinput`, lalu klik **Restart** (atau
+   `touch ~/APP/tmp/restart.txt`). Lakukan lagi setiap kali kode diperbarui.
+
+### Berkas statis dan foto
+- Statis (CSS/JS, termasuk Highcharts) dilayani WhiteNoise dari `STATIC_ROOT`. Agar lebih ringan, biarkan Apache yang
+  melayani langsung: `ln -s ~/APP/staticfiles ~/public_html/static`.
+- Foto pegawai (`/media/`) **tidak** dilayani Django saat `DEBUG=False`: `ln -s ~/APP/media ~/public_html/media`
+  (tanpa ini foto di kiosk dan kartu kosong).
+
+### Alamat klien di belakang proxy
+| Susunan di server | Yang perlu diatur |
+|---|---|
+| Passenger/LiteSpeed langsung (paling umum di cPanel) | Tidak ada. Alamat klien = `REMOTE_ADDR`; header dari klien diabaikan |
+| Nginx reverse proxy di server yang sama (EA-Nginx) | `ATTENDANCE_TRUST_PROXY_HEADER = True`; Nginx harus menimpa header: `proxy_set_header X-Forwarded-For $remote_addr;` |
+| Cloudflare di depan | `ATTENDANCE_CLIENT_IP_HEADER = 'HTTP_CF_CONNECTING_IP'`, dan batasi akses langsung ke server hanya dari alamat Cloudflare |
+
+Cek hasilnya di halaman **Perangkat kiosk** dari PC kantor: alamat yang tampil harus IP publik kantor. Bila tampil
+`127.0.0.1` atau alamat server, proxy belum dipercaya; scan ditolak (gagal-aman) dan log `attendance.qr` memberi tahu.
+
+### Pemeliharaan
+- cPanel → **Cron Jobs**, mingguan:
+  `0 3 * * 0  /home/USERNAME/virtualenv/APP/3.9/bin/python /home/USERNAME/APP/manage.py prune_scanlogs --days 180 >> /home/USERNAME/logs/prune.log 2>&1`
+- Cadangan: pakai cadangan basis data cPanel. Tabel baru: `attendance_qrcard`, `attendance_scandevice`,
+  `attendance_attendancetime`, `attendance_scanlog`, `attendance_officenetwork`.
+- Batas sumber daya (CloudLinux LVE): kode sengaja ringan (19 query per scan, laporan di-cache, tanpa proses latar).
+  Cukup 2 sampai 4 proses aplikasi.
+
+### Bila ada masalah
+| Gejala | Penyebab biasa | Perbaikan |
+|---|---|---|
+| Kiosk: "Di luar jaringan kantor" padahal di kantor | IP publik kantor belum terdaftar atau berganti; atau proxy belum dipercaya | Perangkat kiosk → lihat IP yang tampil → Izinkan IP ini |
+| Kiosk: "PC ini belum dipasangkan" | Belum dipasangkan, cookie terhapus, atau situs dibuka lewat `http` setelah dipasangkan lewat `https` | Pasangkan lagi; selalu pakai `https` (aktifkan HSTS) |
+| Formulir admin: 403 CSRF | `CSRF_TRUSTED_ORIGINS` belum memuat `https://domain` | Tambahkan, restart |
+| 500 setelah deploy | `migrate` belum dijalankan (tabel baru) | `python manage.py migrate` |
+| `ZoneInfoNotFoundError` | Server tanpa basis data zona waktu | `pip install tzdata` |
+| Grafik kosong, tulisan "Grafik tidak tersedia" | `collectstatic` belum dijalankan atau Highcharts tidak ditemukan | `collectstatic`; periksa `main/js_custom/highcharts.js` |
+| Foto kosong di kiosk/kartu | `/media/` tidak dilayani | symlink `public_html/media` (lihat di atas) |
 
 ## Bahasa
 
@@ -261,7 +338,7 @@ Dari rumah scan gagal walau memegang kartu atau fotonya.
 | Lapis | Perlindungan |
 |---|---|
 | Kartu | QR berisi `MDI.<id>.<versi>.<HMAC-SHA256>`; tidak ada token yang disimpan. Dipalsukan = ditolak. Hilang → **Ganti QR** (versi naik, kartu lama langsung mati). Kartu lama tidak menampilkan nama pemiliknya di kiosk |
-| Jaringan | Hanya jaringan privat bawaan; proxy yang tidak dipercaya = ditolak (gagal-aman); alamat klien dari entri paling kanan header proxy tepercaya |
+| Jaringan | Hanya jaringan privat bawaan dan IP kantor yang didaftarkan admin (VPS); rentang terlalu luas ditolak; header proxy dari klien tidak dipercaya, dan koneksi dari proxy lokal yang tidak dipercaya = ditolak (gagal-aman) |
 | PC kiosk | Cookie `HttpOnly`, `SameSite=Strict`, `Secure` di HTTPS, dibatasi ke `/attendance/qr/`; hanya SHA-256 kunci yang disimpan; bisa dicabut seketika |
 | Permintaan scan | Wajib header `X-Kiosk: 1` dan JSON (formulir lintas situs tidak bisa), ukuran dibatasi 1 KB, 60 permintaan/menit per alamat IP, masukan dibatasi panjang dan karakternya sebelum diperiksa |
 | Hak akses | Login + keanggotaan salah satu grup (bukan hanya grup pertama); tidak berhak = HTTP 403; semua tombol yang mengubah data wajib POST dan token CSRF |

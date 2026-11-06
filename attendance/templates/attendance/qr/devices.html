@@ -7,11 +7,41 @@
 </div>
 <h5>{% t 'dev.pair_title' %}</h5>
 <p class="text-muted">{% t 'dev.pair_desc' %}</p>
-<form method="post" action="{% url 'qr-device-pair' %}" class="qr-form mb-4">{% csrf_token %}
+<form method="post" action="{% url 'qr-device-pair' %}" class="qr-form mb-2">{% csrf_token %}
 	<input class="form-control" type="text" name="name" maxlength="100" aria-label="{% t 'dev.pair_name' %}" placeholder="{% t 'dev.pair_name' %}">
 	<button class="btn btn-mdi" type="submit">{% t 'dev.pair_btn' %} <i class="fa fa-desktop"></i></button>
+	{% if not my_ip_ok and not network_open %}
+	<label class="qr-checkall mb-0"><input type="checkbox" name="allow_ip" value="1" checked> {% t 'dev.allow_ip' ip=my_ip %}</label>
+	{% endif %}
 </form>
-<h5>{% t 'dev.list_title' %}</h5>
+<h5 class="mt-4">{% t 'net.title' %}</h5>
+<p class="text-muted mb-2">{% t 'net.sub' %}</p>
+<div class="alert {% if my_ip_ok %}alert-success{% else %}alert-warning{% endif %} p-2">
+	{% t 'net.mine' ip=my_ip %} — <b>{% if my_ip_ok %}{% t 'net.ok' %}{% else %}{% t 'net.no' %}{% endif %}</b>
+	{% if not my_ip_ok %}<small class="d-block">{% t 'net.warn' %}</small>{% endif %}
+</div>
+{% if settings_nets %}<p class="text-muted"><small>{% t 'net.from_settings' nets=settings_nets %}</small></p>{% endif %}
+<form method="post" action="{% url 'qr-net-add' %}" class="qr-form mb-3">{% csrf_token %}
+	<input class="form-control" type="text" name="cidr" maxlength="64" aria-label="{% t 'net.add_title' %}" placeholder="{% t 'net.cidr_ph' %}">
+	<input class="form-control" type="text" name="note" maxlength="100" aria-label="{% t 'net.note_ph' %}" placeholder="{% t 'net.note_ph' %}">
+	<button class="btn btn-mdi" type="submit">{% if my_ip != '?' %}{% t 'net.use_mine' %}{% else %}{% t 'net.add_btn' %}{% endif %}</button>
+</form>
+<table class="table table-sm table-striped qr-stack">
+	<thead><tr><th>{% t 'th.cidr' %}</th><th>{% t 'th.note' %}</th><th>{% t 'th.status' %}</th><th></th></tr></thead>
+	<tbody>
+	{% for n in networks %}
+		<tr>
+			<td data-label="{% t 'th.cidr' %}" class="qr-main">{{ n.cidr }}</td>
+			<td data-label="{% t 'th.note' %}">{{ n.note|default:"-" }}</td>
+			<td data-label="{% t 'th.status' %}">{% if n.is_active %}<span class="badge badge-success">{% t 'st.active' %}</span>{% else %}<span class="badge badge-danger">{% t 'st.inactive' %}</span>{% endif %}</td>
+			<td class="qr-act"><form method="post" action="{% url 'qr-net-toggle' n.pk %}">{% csrf_token %}
+				<button class="btn btn-sm btn-mdi" type="submit">{% if n.is_active %}{% t 'dev.disable' %}{% else %}{% t 'dev.enable' %}{% endif %}</button></form></td>
+		</tr>
+	{% empty %}<tr><td colspan="4" class="text-muted">{% t 'net.empty' %}</td></tr>
+	{% endfor %}
+	</tbody>
+</table>
+<h5 class="mt-4">{% t 'dev.list_title' %}</h5>
 <table class="table table-sm table-striped qr-stack">
 	<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.last_seen' %}</th><th></th></tr></thead>
 	<tbody>

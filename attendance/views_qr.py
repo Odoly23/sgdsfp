@@ -26,7 +26,7 @@ from leave.models import Leaves
 from attendance import qr_i18n as i18n
 from attendance import qr_service as svc
 from attendance.models import Attendance
-from attendance.models_qr import QRCard, ScanDevice, ScanLog
+from attendance.models_qr import OfficeNetwork, QRCard, ScanDevice, ScanLog
 
 
 # ============================================================ akses
@@ -224,9 +224,13 @@ def _cookie_path():
 
 @qr_access('DEVICE_GROUPS')
 def devices(request):
+	my_ip = svc.client_ip(request)
+	settings_nets = svc.allowed_nets()
 	return render(request, 'attendance/qr/devices.html', _page(
 		request, 'dev.title', devices=ScanDevice.objects.order_by('-id'), this_device=svc.device_from_request(request),
-		active='devices'))
+		active='devices', my_ip=my_ip or '?', my_ip_ok=bool(my_ip) and svc.ip_allowed(my_ip),
+		networks=OfficeNetwork.objects.order_by('-id'),
+		settings_nets=', '.join(settings_nets) if settings_nets else '', network_open=settings_nets is None))
 
 
 @qr_access('DEVICE_GROUPS')
@@ -240,11 +244,51 @@ def device_pair(request):
 		ScanDevice.objects.filter(pk=previous.pk).update(is_active=False)      # satu browser = satu pemasangan aktif
 	key = svc.new_device_key()
 	ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key), datetime=timezone.now(), user=request.user)
+	if request.POST.get('allow_ip') == '1':                     # satu klik: PC kiosk + IP kantor (perlu di VPS/internet)
+		_allow_ip(request, svc.client_ip(request), name)
 	resp = redirect('qr-devices')
 	resp.set_cookie(svc.conf('KIOSK_COOKIE'), key, max_age=5 * 365 * 86400, httponly=True, secure=request.is_secure(),
 					samesite='Strict', path=_cookie_path())
 	messages.success(request, _tr(request, 'dev.paired', name=name))
 	return resp
+
+
+def _allow_ip(request, raw, note=''):
+	"""Mendaftarkan IP/jaringan kantor. Mengembalikan 'invalid'/'broad' bila ditolak, selain itu cidr yang tersimpan."""
+	cidr, err = svc.broad_net_error(raw)
+	if err:
+		return err
+	if not svc.ip_allowed(raw.split('/')[0]):
+		obj, created = OfficeNetwork.objects.get_or_create(
+			cidr=cidr, defaults={'note': note[:100], 'datetime': timezone.now(), 'user': request.user})
+		if not created and not obj.is_active:
+			obj.is_active = True
+			obj.save(update_fields=['is_active'])
+		svc.forget_office_networks()
+	return cidr
+
+
+@qr_access('DEVICE_GROUPS')
+@require_POST
+def net_add(request):
+	raw = request.POST.get('cidr', '').strip()[:64] or svc.client_ip(request)        # kosong = IP browser ini
+	result = _allow_ip(request, raw, request.POST.get('note', ''))
+	if result in ('invalid', 'broad'):
+		messages.warning(request, _tr(request, 'net.msg_invalid' if result == 'invalid' else 'net.msg_broad'))
+	else:
+		messages.success(request, _tr(request, 'net.msg_added', cidr=result))
+	return redirect('qr-devices')
+
+
+@qr_access('DEVICE_GROUPS')
+@require_POST
+def net_toggle(request, pk):
+	net = get_object_or_404(OfficeNetwork, pk=pk)
+	net.is_active = not net.is_active
+	net.save(update_fields=['is_active'])
+	svc.forget_office_networks()
+	messages.success(request, _tr(request, 'net.msg_on' if net.is_active else 'net.msg_off', cidr=net.cidr))
+	return redirect('qr-devices')
 
 
 @qr_access('DEVICE_GROUPS')
