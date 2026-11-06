@@ -1,6 +1,7 @@
 import csv
 import datetime
 import io
+import ipaddress
 import json
 from functools import wraps
 
@@ -107,6 +108,16 @@ def set_lang(request, code):
 	return resp
 
 
+def _cookie_path():
+	return reverse('qr-today').rsplit('today/', 1)[0]      # hanya terkirim ke alamat /attendance/qr/
+
+
+def _set_kiosk_cookie(resp, request, key):
+	"""Titipkan token PC kiosk ke browser ini: HttpOnly (tidak terbaca JavaScript), SameSite=Strict, Secure di HTTPS."""
+	resp.set_cookie(svc.conf('KIOSK_COOKIE'), key, max_age=5 * 365 * 86400, httponly=True, secure=request.is_secure(),
+					samesite='Strict', path=_cookie_path())
+
+
 # ============================================================ kiosk (halaman scan)
 
 def kiosk(request):
@@ -153,7 +164,7 @@ def kiosk_scan(request):
 	lang = i18n.norm(body.get('lang'))
 	if not svc.network_ok(request):
 		return _scan_error(lang, 'net', 403)
-	device = svc.device_from_request(request)
+	device, _status = svc.resolve_device(request)         # salinan yang terdeteksi langsung dicabut di sini
 	if svc.conf('REQUIRE_DEVICE_KEY') and not device:
 		return _scan_error(lang, 'device', 401)
 	code = body.get('code', '')
@@ -174,15 +185,22 @@ def kiosk_scan(request):
 
 @require_GET
 def kiosk_check(request):
-	"""Dipanggil kiosk tiap 30 detik: server hidup? jaringan boleh? PC sudah dipasangkan?"""
+	"""Denyut kiosk tiap 30 detik: server hidup? jaringan boleh? PC sudah dipasangkan?
+	Denyut ini juga memutar token PC kiosk secara berkala (Set-Cookie baru) sehingga salinan cookie cepat basi."""
 	if not svc.throttle(request, 'check'):
 		return JsonResponse({'ok': False, 'state': 'throttle'}, status=429)
 	if not svc.network_ok(request):
 		resp = JsonResponse({'ok': False, 'state': 'net'}, status=403)
-	elif svc.conf('REQUIRE_DEVICE_KEY') and not svc.device_from_request(request):
-		resp = JsonResponse({'ok': False, 'state': 'key'}, status=401)
 	else:
-		resp = JsonResponse({'ok': True, 'state': 'ok'})
+		device, status = svc.resolve_device(request)
+		if svc.conf('REQUIRE_DEVICE_KEY') and not device:
+			resp = JsonResponse({'ok': False, 'state': 'key'}, status=401)
+		else:
+			resp = JsonResponse({'ok': True, 'state': 'ok'})
+			if device and (status == 'prev' or svc.needs_rotation(device)):
+				new_key = svc.rotate_device(device)
+				if new_key:
+					_set_kiosk_cookie(resp, request, new_key)
 	resp['Cache-Control'] = 'no-store'
 	return resp
 
@@ -211,16 +229,16 @@ def today(request):
 		log.local = svc.to_local(log.scanned_at).strftime('%H:%M:%S')
 		key = 'res.%s.title' % log.code
 		log.label = i18n.tr(lang, key) if key in i18n.MESSAGES else log.code
+	week_ago = timezone.now() - datetime.timedelta(days=7)
+	alerts = [{'text': i18n.tr(lang, 'today.reuse_alert', name=a.device.name if a.device else '?', ip=a.ip or '?',
+							   time=svc.to_local(a.scanned_at).strftime('%d/%m %H:%M'))}
+			  for a in ScanLog.objects.filter(code='device_reuse', scanned_at__gte=week_ago).select_related('device')[:3]]
 	return render(request, 'attendance/qr/today.html', _page(
 		request, 'today.title', date=d, date_text=i18n.fmt_date(d, lang), stats=stats, items=items, logs=logs, active='today',
-		off_text=i18n.reason_text(off[0], off[1], lang) if off else ''))
+		alerts=alerts, off_text=i18n.reason_text(off[0], off[1], lang) if off else ''))
 
 
 # ============================================================ PC kiosk (pemasangan)
-
-def _cookie_path():
-	return reverse('qr-today').rsplit('today/', 1)[0]      # hanya terkirim ke alamat /attendance/qr/...
-
 
 @qr_access('DEVICE_GROUPS')
 def devices(request):
@@ -230,7 +248,8 @@ def devices(request):
 		request, 'dev.title', devices=ScanDevice.objects.order_by('-id'), this_device=svc.device_from_request(request),
 		active='devices', my_ip=my_ip or '?', my_ip_ok=bool(my_ip) and svc.ip_allowed(my_ip),
 		networks=OfficeNetwork.objects.order_by('-id'),
-		settings_nets=', '.join(settings_nets) if settings_nets else '', network_open=settings_nets is None))
+		settings_nets=', '.join(settings_nets) if settings_nets else '', network_open=settings_nets is None,
+		ip_check=svc.network_enforced()))
 
 
 @qr_access('DEVICE_GROUPS')
@@ -243,12 +262,12 @@ def device_pair(request):
 	if previous:
 		ScanDevice.objects.filter(pk=previous.pk).update(is_active=False)      # satu browser = satu pemasangan aktif
 	key = svc.new_device_key()
-	ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key), datetime=timezone.now(), user=request.user)
-	if request.POST.get('allow_ip') == '1':                     # satu klik: PC kiosk + IP kantor (perlu di VPS/internet)
+	ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key), datetime=timezone.now(), user=request.user,
+							  rotated_at=timezone.now())
+	if request.POST.get('allow_ip') == '1' and svc.network_enforced():                     # satu klik: PC kiosk + IP kantor (perlu di VPS/internet)
 		_allow_ip(request, svc.client_ip(request), name)
 	resp = redirect('qr-devices')
-	resp.set_cookie(svc.conf('KIOSK_COOKIE'), key, max_age=5 * 365 * 86400, httponly=True, secure=request.is_secure(),
-					samesite='Strict', path=_cookie_path())
+	_set_kiosk_cookie(resp, request, key)
 	messages.success(request, _tr(request, 'dev.paired', name=name))
 	return resp
 
@@ -272,6 +291,9 @@ def _allow_ip(request, raw, note=''):
 @require_POST
 def net_add(request):
 	raw = request.POST.get('cidr', '').strip()[:64] or svc.client_ip(request)        # kosong = IP browser ini
+	addr = svc._parse_ip(raw)
+	if addr is not None and addr.version == 6:         # alamat IPv6 sementara berganti-ganti: daftarkan rentang /64-nya
+		raw = str(ipaddress.ip_network((addr, 64), strict=False))
 	result = _allow_ip(request, raw, request.POST.get('note', ''))
 	if result in ('invalid', 'broad'):
 		messages.warning(request, _tr(request, 'net.msg_invalid' if result == 'invalid' else 'net.msg_broad'))

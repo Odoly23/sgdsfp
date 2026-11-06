@@ -21,9 +21,13 @@ class QRCard(models.Model):
 
 
 class ScanDevice(models.Model):
-	"""Perangkat kiosk yang boleh mengirim scan. Hanya SHA-256 dari kunci yang disimpan."""
+	"""PC kiosk yang boleh mengirim scan. Hanya SHA-256 dari token yang disimpan. Token di browser PC itu diputar
+	otomatis; token lama yang muncul lagi setelah token baru dipakai = salinan, dan PC dicabut."""
 	name = models.CharField(max_length=100, verbose_name="Naran")
 	key_sha256 = models.CharField(max_length=64, unique=True)
+	prev_sha256 = models.CharField(max_length=64, blank=True, db_index=True)     # token sebelum diputar (masa tenggang)
+	rotated_at = models.DateTimeField(null=True, blank=True)                     # kapan token terakhir diputar
+	current_used_at = models.DateTimeField(null=True, blank=True)                # token baru sudah dipakai PC sah
 	is_active = models.BooleanField(default=True)
 	last_seen = models.DateTimeField(null=True, blank=True)
 	datetime = models.DateTimeField(null=True)

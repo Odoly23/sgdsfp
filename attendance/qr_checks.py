@@ -33,9 +33,14 @@ def check_attendance_qr(app_configs, **kwargs):
 		out.append(Warning('ATTENDANCE_QR_SECRET belum diisi: tanda tangan QR memakai SECRET_KEY.',
 						   hint='Isi dengan string acak panjang dari environment variable; mengganti SECRET_KEY nanti '
 								'tidak akan membuat kartu hangus.', id='attendance.W001'))
-	if svc.allowed_nets() is None:
+	if svc.network_enforced() and svc.allowed_nets() is None:
 		out.append(Warning('ATTENDANCE_KIOSK_ALLOWED_IPS = [] membuka scan dari seluruh internet.',
 						   hint='Hapus setelan itu agar hanya jaringan privat kantor yang diterima.', id='attendance.W002'))
+	if svc.conf('NETWORK_MODE') not in ('device', 'allowlist'):
+		out.append(Error('ATTENDANCE_NETWORK_MODE harus "device" atau "allowlist".', id='attendance.E004'))
+	if svc.conf('NETWORK_MODE') == 'device' and not svc.conf('REQUIRE_DEVICE_KEY'):
+		out.append(Warning('ATTENDANCE_NETWORK_MODE="device" tetapi ATTENDANCE_REQUIRE_DEVICE_KEY=False: tidak ada penjaga PC kiosk, '
+						   'cek IP dipakai sebagai pengganti.', id='attendance.W005'))
 	if not svc.conf('REQUIRE_DEVICE_KEY'):
 		out.append(Warning('ATTENDANCE_REQUIRE_DEVICE_KEY = False: scan tidak dikunci ke PC kiosk tertentu.',
 						   id='attendance.W003'))

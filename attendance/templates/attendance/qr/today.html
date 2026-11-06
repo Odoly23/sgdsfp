@@ -1,6 +1,7 @@
 {% extends 'attendance/qr/base.html' %}
 {% load qr_i18n %}
 {% block qr_body %}
+{% for a in alerts %}<div class="alert alert-danger p-2"><i class="fa fa-exclamation-triangle"></i> {{ a.text }}</div>{% endfor %}
 <h3 align="center" class="qr-h">{{ date_text|upper }}</h3>
 <p class="text-center text-muted">{% t 'today.refresh' %}</p>
 {% if off_text %}<div class="alert alert-warning p-2">{% t 'today.off' reason=off_text %}</div>{% endif %}

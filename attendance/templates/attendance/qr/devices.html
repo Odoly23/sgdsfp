@@ -14,6 +14,7 @@
 	<label class="qr-checkall mb-0"><input type="checkbox" name="allow_ip" value="1" checked> {% t 'dev.allow_ip' ip=my_ip %}</label>
 	{% endif %}
 </form>
+{% if ip_check %}
 <h5 class="mt-4">{% t 'net.title' %}</h5>
 <p class="text-muted mb-2">{% t 'net.sub' %}</p>
 <div class="alert {% if my_ip_ok %}alert-success{% else %}alert-warning{% endif %} p-2">
@@ -41,6 +42,10 @@
 	{% endfor %}
 	</tbody>
 </table>
+{% else %}
+<h5 class="mt-4">{% t 'net.title' %}</h5>
+<div class="alert alert-info p-2">{% t 'net.mode_device' %}<small class="d-block">{% t 'net.mine' ip=my_ip %}</small></div>
+{% endif %}
 <h5 class="mt-4">{% t 'dev.list_title' %}</h5>
 <table class="table table-sm table-striped qr-stack">
 	<thead><tr><th>{% t 'th.name' %}</th><th>{% t 'th.status' %}</th><th>{% t 'th.last_seen' %}</th><th></th></tr></thead>

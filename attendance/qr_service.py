@@ -51,6 +51,9 @@ _DEFAULTS = {
 	'HOLIDAY_CACHE_SECONDS': 60,   # cache daftar libur untuk jalur scan; 0 = mati
 	'MAX_BODY_BYTES': 1024,        # batas ukuran permintaan scan
 	'KIOSK_COOKIE': 'mdi_kiosk',
+	'NETWORK_MODE': 'device',      # 'device' = penjaga utama PC kiosk terpasang (cocok untuk IP berganti, mis. Starlink); 'allowlist' = cek IP
+	'DEVICE_ROTATE_HOURS': 6,      # token PC kiosk diputar tiap sekian jam (lewat denyut kiosk)
+	'DEVICE_GRACE_HOURS': 24,      # token lama masih diterima sekian jam setelah diputar (bila Set-Cookie tidak sampai)
 	'CLIENT_IP_HEADER': None,      # mis. 'HTTP_CF_CONNECTING_IP' (Cloudflare) atau 'HTTP_X_REAL_IP'; hanya bila front-end tepercaya
 	'MANAGER_GROUPS': ['admin', 'staff'],
 	'VIEWER_GROUPS': ['admin', 'staff', 'president'],
@@ -203,11 +206,17 @@ def ip_allowed(ip):
 	return _in_nets(addr, nets) or _in_nets(addr, office_networks())
 
 
+def network_enforced():
+	"""Cek IP dipakai hanya pada mode 'allowlist', atau sebagai pengaman bila pemasangan PC dimatikan
+	(mode 'device' tanpa pemasangan PC berarti tidak ada penjaga sama sekali)."""
+	return conf('NETWORK_MODE') == 'allowlist' or not conf('REQUIRE_DEVICE_KEY')
+
+
 def network_ok(request):
 	"""Jaringan kantor saja. Gagal-aman: bila koneksi datang dari proxy lokal (REMOTE_ADDR privat) yang membawa header
 	proxy tetapi proxy tidak dipercaya, alamat asli klien tidak diketahui, jadi ditolak dan admin diberi tahu lewat log.
 	Bila REMOTE_ADDR publik (tanpa proxy lokal, mis. Passenger/LiteSpeed langsung), header dari klien diabaikan saja."""
-	if allowed_nets() is None:
+	if not network_enforced() or allowed_nets() is None:
 		return True
 	trusted = conf('TRUST_PROXY_HEADER') or conf('CLIENT_IP_HEADER')
 	if not trusted and any(h in request.META for h in _PROXY_HEADERS) and _is_local(_parse_ip(request.META.get('REMOTE_ADDR'))):
@@ -219,8 +228,8 @@ def network_ok(request):
 
 
 def security_is_open():
-	"""True bila jaringan sengaja dibuka lebar (perlu peringatan ke admin)."""
-	return allowed_nets() is None
+	"""True bila jaringan sengaja dibuka lebar pada mode yang memakai cek IP (perlu peringatan ke admin)."""
+	return network_enforced() and allowed_nets() is None
 
 
 def throttle(request, scope='scan'):
@@ -251,9 +260,67 @@ def get_device(key):
 	return ScanDevice.objects.filter(key_sha256=hash_key(key), is_active=True).first()
 
 
+def authenticate_device(key):
+	"""(perangkat, status) dengan status: current | prev | reuse | none.
+	- current: token terbaru.
+	- prev: token sebelum diputar, masih dalam masa tenggang, dan token baru belum pernah dipakai: PC sah yang belum
+	  menerima Set-Cookie. Diterima lalu token diputar ulang.
+	- reuse: token lama muncul padahal token baru sudah dipakai PC sah = ada salinan; PC dicabut oleh pemanggil.
+	- none: tidak dikenal, dinonaktifkan, atau token lama sudah lewat masa tenggang."""
+	if not key or len(key) > 128:
+		return None, 'none'
+	h = hash_key(key)
+	dev = ScanDevice.objects.filter(is_active=True).filter(Q(key_sha256=h) | Q(prev_sha256=h)).first()
+	if not dev:
+		return None, 'none'
+	now = timezone.now()
+	if dev.key_sha256 == h:
+		if not dev.current_used_at or (now - dev.current_used_at).total_seconds() > 60:
+			ScanDevice.objects.filter(pk=dev.pk).update(current_used_at=now)
+		return dev, 'current'
+	grace = datetime.timedelta(hours=conf('DEVICE_GRACE_HOURS'))
+	if not dev.rotated_at or now - dev.rotated_at > grace:
+		return None, 'none'
+	if dev.current_used_at and dev.current_used_at > dev.rotated_at:
+		return dev, 'reuse'
+	return dev, 'prev'
+
+
+def rotate_device(dev):
+	"""Putar token PC kiosk. Mengembalikan token baru (untuk Set-Cookie) atau None bila sudah diputar proses lain."""
+	key = new_device_key()
+	changed = ScanDevice.objects.filter(pk=dev.pk, key_sha256=dev.key_sha256).update(
+		prev_sha256=dev.key_sha256, key_sha256=hash_key(key), rotated_at=timezone.now(), current_used_at=None)
+	return key if changed else None
+
+
+def needs_rotation(dev):
+	if not dev.rotated_at:
+		return True
+	return (timezone.now() - dev.rotated_at) >= datetime.timedelta(hours=conf('DEVICE_ROTATE_HOURS'))
+
+
+def revoke_for_reuse(dev, ip=''):
+	"""Token lama dipakai setelah token baru: kemungkinan cookie disalin. Cabut PC dan catat untuk admin."""
+	ScanDevice.objects.filter(pk=dev.pk).update(is_active=False)
+	ScanLog.objects.create(device=dev, scanned_at=timezone.now(), code='device_reuse', ip=ip or None,
+						   message='PC "%s" dicabut: token lama dipakai setelah token baru' % dev.name[:100])
+	log.warning('PC kiosk "%s" dicabut otomatis: token lama dipakai dari %s setelah token baru dipakai.', dev.name, ip or '?')
+
+
+def resolve_device(request):
+	"""Mengenali PC kiosk dari cookie (atau header X-Kiosk-Key untuk klien API).
+	Mengembalikan (perangkat aktif atau None, status). Salinan yang terdeteksi langsung dicabut."""
+	key = request.COOKIES.get(conf('KIOSK_COOKIE')) or request.headers.get('X-Kiosk-Key', '')
+	dev, status = authenticate_device(key)
+	if status == 'reuse':
+		revoke_for_reuse(dev, client_ip(request))
+		return None, 'reuse'
+	return dev, status
+
+
 def device_from_request(request):
-	"""PC kiosk dikenali dari penanda (cookie HttpOnly) yang dipasang admin; header X-Kiosk-Key untuk klien API."""
-	return get_device(request.COOKIES.get(conf('KIOSK_COOKIE')) or request.headers.get('X-Kiosk-Key', ''))
+	return resolve_device(request)[0]
 
 
 def in_groups(user, names):

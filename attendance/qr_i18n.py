@@ -403,6 +403,17 @@ MESSAGES = {
 	'dev.allow_ip': ('Fó lisensa mós IP eskritóriu ne\'e ({ip})', 'Also allow this office IP ({ip})',
 		'Izinkan juga IP kantor ini ({ip})', 'Permitir também este IP do escritório ({ip})'),
 	'th.cidr': ('IP / rede', 'IP / network', 'IP / jaringan', 'IP / rede'),
+	# ---------------------------------------------------------------- mode PC kiosk (IP berganti, mis. Starlink)
+	'net.mode_device': ('Cek IP la uza tanba IP eskritóriu bele troka (ezemplu Starlink). Proteksaun: PC kiosk ne\'ebé hanesan ona, ho token ne\'ebé troka automátiku.',
+		'IP check is off because the office IP can change (e.g. Starlink). Protection: the paired kiosk PC, with a token that rotates automatically.',
+		'Cek IP dimatikan karena IP kantor bisa berganti (mis. Starlink). Penjagaan: PC kiosk yang dipasangkan, dengan token yang diputar otomatis.',
+		'A verificação de IP está desligada porque o IP do escritório pode mudar (ex.: Starlink). Proteção: o PC de quiosque emparelhado, com um token que roda automaticamente.'),
+	'today.reuse_alert': ('PC kiosk "{name}" kansela automátiku ({time}, IP {ip}): token tuan uza depois token foun, bele cookie kopia. Hanesan fali se PC ne\'e ita-nia.',
+		'Kiosk PC "{name}" was revoked automatically ({time}, IP {ip}): an old token was used after the new one — the cookie may have been copied. Pair it again if this is your PC.',
+		'PC kiosk "{name}" dicabut otomatis ({time}, IP {ip}): token lama dipakai setelah token baru, cookie mungkin disalin. Pasangkan ulang bila ini PC Anda.',
+		'O PC de quiosque "{name}" foi revogado automaticamente ({time}, IP {ip}): um token antigo foi usado depois do novo — o cookie pode ter sido copiado. Emparelhe novamente se este for o seu PC.'),
+	'res.device_reuse.title': ('PC kiosk kansela', 'Kiosk PC revoked', 'PC kiosk dicabut', 'PC de quiosque revogado'),
+	'res.device_reuse.msg': ('Token tuan uza depois token foun.', 'An old token was used after the new one.', 'Token lama dipakai setelah token baru.', 'Um token antigo foi usado depois do novo.'),
 }
 
 # daftar kunci yang dikirim ke JavaScript kiosk

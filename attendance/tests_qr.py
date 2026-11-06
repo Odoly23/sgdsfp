@@ -34,7 +34,7 @@ class QRBase(TestCase):
 	def pair(self, name='Pintu'):
 		"""Memasangkan klien uji sebagai PC kiosk (cookie penanda), seperti yang dilakukan admin di PC pintu."""
 		key = svc.new_device_key()
-		dev = ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key))
+		dev = ScanDevice.objects.create(name=name, key_sha256=svc.hash_key(key), rotated_at=timezone.now())
 		self.client.cookies['mdi_kiosk'] = key
 		return dev, key
 
@@ -574,6 +574,7 @@ class ViewTests(QRBase):
 
 
 
+@override_settings(ATTENDANCE_NETWORK_MODE='allowlist')
 class NetworkTests(QRBase):
 	"""Scan hanya dari jaringan kantor: dari rumah (alamat publik) harus gagal."""
 
@@ -1474,6 +1475,7 @@ class PerformanceTests(QRBase):
 		self.assertIn('defer src="/static/attendance/qr/charts.js?v=', html)
 
 
+@override_settings(ATTENDANCE_NETWORK_MODE='allowlist')
 class OfficeNetworkTests(QRBase):
 	"""VPS/cPanel: server hanya melihat IP publik kantor; admin mendaftarkannya sendiri dari halaman Perangkat kiosk."""
 	HOME = '114.4.20.10'
@@ -1501,6 +1503,13 @@ class OfficeNetworkTests(QRBase):
 		Attendance.objects.all().delete()
 		self.assertEqual(self.scan_from(self.HOME).status_code, 403)                      # dari rumah tetap gagal
 		self.assertEqual(self.scan_from('203.0.113.10').status_code, 403)                 # IP tetangga bukan kantor
+
+	def test_ipv6_is_registered_as_its_64_prefix(self):
+		self.client.post(reverse('qr-net-add'), {}, REMOTE_ADDR='2a0d:3344:1:2:aaaa:bbbb:cccc:1')
+		self.assertEqual(OfficeNetwork.objects.get().cidr, '2a0d:3344:1:2::/64')
+		self.assertEqual(self.scan_from('2a0d:3344:1:2:1111:2222:3333:4444').status_code, 200)    # alamat sementara lain
+		Attendance.objects.all().delete()
+		self.assertEqual(self.scan_from('2a0d:3344:1:3::1').status_code, 403)                  # /64 tetangga
 
 	def test_range_and_note(self):
 		self.client.post(reverse('qr-net-add'), {'cidr': '203.0.113.0/24', 'note': 'Kantor MDI'})
@@ -1660,3 +1669,190 @@ class DeploymentTests(QRBase):
 				self.assertTrue(fb.get('attqr:proxywarn') is None)
 		finally:
 			shutil.rmtree(d, ignore_errors=True)
+
+
+class DeviceTokenTests(QRBase):
+	"""Mode bawaan 'device' (cocok untuk IP berganti seperti Starlink): penjaga utama PC kiosk dengan token berputar."""
+	HOME = '114.4.20.10'
+	STARLINK = ['100.64.12.1', '203.0.113.77', '2a0d:3344:1:2::5']
+
+	def beat(self, **extra):
+		return self.client.get(reverse('qr-kiosk-check'), **extra)
+
+	def scan_as(self, ip='127.0.0.1'):
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			return self.post_scan({'code': self.payload}, REMOTE_ADDR=ip)
+
+	T0 = at(MON, 7)                                                              # jam palsu: denyut pertama yang memutar token
+
+	def rotate_now(self):
+		with mock.patch.object(timezone, 'now', lambda: self.T0):
+			return self.beat(), self.T0
+
+	def minutes_later(self, m):
+		return mock.patch.object(timezone, 'now', lambda: self.T0 + datetime.timedelta(minutes=m))
+
+	# ---------- IP boleh berganti
+	def test_changing_office_ip_does_not_break_the_paired_pc(self):
+		self.pair()
+		for ip in self.STARLINK:
+			Attendance.objects.all().delete()
+			self.assertEqual(self.scan_as(ip).status_code, 200, ip)
+
+	def test_home_is_still_impossible_without_the_pc_token(self):
+		for ip in [self.HOME, '192.168.1.20', '127.0.0.1'] + self.STARLINK:
+			r = self.scan_as(ip)
+			self.assertEqual((r.status_code, r.json()['code']), (401, 'device'), ip)
+		self.assertEqual(Attendance.objects.count(), 0)
+
+	def test_other_devices_on_the_office_wifi_cannot_scan(self):
+		self.pair()                                                              # PC kiosk memegang cookie
+		from django.test import Client
+		phone = Client()                                                         # HP pegawai di Wi-Fi kantor: IP sama, tanpa cookie
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			r = phone.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json',
+						   HTTP_X_KIOSK='1', REMOTE_ADDR='203.0.113.77')
+		self.assertEqual(r.status_code, 401)
+
+	@override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=False)
+	def test_without_pairing_the_ip_check_comes_back_as_safety_net(self):
+		self.assertEqual(self.scan_as('203.0.113.77').status_code, 403)           # tanpa penjaga PC, cek IP wajib
+		self.assertEqual(self.scan_as('192.168.1.20').status_code, 200)
+
+	def test_checks_flag_bad_mode_combinations(self):
+		from django.core.checks import run_checks
+		ids = lambda: {m.id for m in run_checks() if m.id.startswith('attendance.')}
+		self.assertNotIn('attendance.W005', ids())
+		with override_settings(ATTENDANCE_REQUIRE_DEVICE_KEY=False):
+			self.assertIn('attendance.W005', ids())
+		with override_settings(ATTENDANCE_NETWORK_MODE='bebas'):
+			self.assertIn('attendance.E004', ids())
+
+	# ---------- rotasi token
+	def test_no_rotation_before_it_is_due(self):
+		self.pair()
+		r = self.beat()
+		self.assertEqual(r.status_code, 200)
+		self.assertNotIn('mdi_kiosk', r.cookies)
+
+	def test_token_rotates_after_interval_with_secure_cookie(self):
+		dev, old = self.pair()
+		r, future = self.rotate_now()
+		self.assertEqual(r.status_code, 200)
+		c = r.cookies['mdi_kiosk']
+		self.assertNotEqual(c.value, old)
+		self.assertTrue(c['httponly'])
+		self.assertEqual((c['samesite'], c['path']), ('Strict', '/attendance/qr/'))
+		d = ScanDevice.objects.get()
+		self.assertEqual((d.key_sha256, d.prev_sha256, d.rotated_at), (svc.hash_key(c.value), svc.hash_key(old), future))
+		self.assertIsNone(d.current_used_at)
+		self.assertEqual(self.scan_as().status_code, 200)                         # klien uji memakai cookie baru otomatis
+		self.assertEqual(ScanDevice.objects.count(), 1)
+
+	def test_rotation_happens_only_on_heartbeat_not_on_scan(self):
+		dev, old = self.pair()
+		future = timezone.now() + datetime.timedelta(hours=7)
+		with mock.patch.object(timezone, 'now', lambda: future):
+			r = self.post_scan({'code': 'x'})
+		self.assertNotIn('mdi_kiosk', r.cookies)                                  # jalur scan tetap ringan
+
+	def test_kiosk_that_missed_the_new_cookie_heals_without_being_revoked(self):
+		dev, old = self.pair()
+		self.rotate_now()
+		self.client.cookies['mdi_kiosk'] = old                                    # Set-Cookie tidak pernah sampai ke browser
+		r = self.beat()
+		self.assertEqual(r.status_code, 200)
+		self.assertIn('mdi_kiosk', r.cookies)                                      # token baru dikirim ulang
+		self.assertTrue(ScanDevice.objects.get().is_active)
+		self.assertEqual(self.scan_as().status_code, 200)
+
+	def test_copied_cookie_is_detected_and_the_pc_is_revoked(self):
+		dev, old = self.pair()
+		self.rotate_now()                                                         # kiosk menerima token baru...
+		with self.minutes_later(1):
+			self.beat()                                                           # ...dan memakainya: pemegang sah terbukti
+		self.assertIsNotNone(ScanDevice.objects.get().current_used_at)
+		from django.test import Client
+		thief = Client()
+		thief.cookies['mdi_kiosk'] = old                                          # salinan token lama dibawa pulang
+		with self.minutes_later(60):
+			r = thief.post(reverse('qr-kiosk-scan'), data={'code': self.payload}, content_type='application/json',
+						   HTTP_X_KIOSK='1', REMOTE_ADDR=self.HOME)
+		self.assertEqual((r.status_code, r.json()['code']), (401, 'device'))      # pencuri tidak diberi tahu sebabnya
+		self.assertEqual(Attendance.objects.count(), 0)
+		d = ScanDevice.objects.get()
+		self.assertFalse(d.is_active)
+		log = ScanLog.objects.get(code='device_reuse')
+		self.assertEqual((log.ip, log.device_id), (self.HOME, d.pk))
+		with self.minutes_later(61):
+			self.assertEqual(self.post_scan({'code': self.payload}).status_code, 401)   # PC sah ikut dicabut: pasangkan ulang
+
+	def test_admin_sees_alert_after_a_copied_token_is_detected(self):
+		dev, old = self.pair()
+		self.rotate_now()
+		with self.minutes_later(1):
+			self.beat()
+		ScanLog.objects.all().delete()
+		from django.test import Client
+		thief = Client()
+		thief.cookies['mdi_kiosk'] = old
+		with self.minutes_later(5):
+			thief.post(reverse('qr-kiosk-scan'), data={'code': 'x'}, content_type='application/json', HTTP_X_KIOSK='1', REMOTE_ADDR=self.HOME)
+		u = User.objects.create_user('alert', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		html = self.client.get(reverse('qr-today')).content.decode()
+		self.assertIn('dicabut otomatis', html)
+		self.assertIn(self.HOME, html)
+
+	def test_old_token_after_grace_is_just_unknown(self):
+		dev, old = self.pair()
+		self.rotate_now()
+		later = self.T0 + datetime.timedelta(hours=25)                           # lewat masa tenggang 24 jam
+		self.client.cookies['mdi_kiosk'] = old
+		with mock.patch.object(timezone, 'now', lambda: later):
+			r = self.beat()
+		self.assertEqual(r.status_code, 401)
+		self.assertTrue(ScanDevice.objects.get().is_active)                        # tidak dicabut: kemungkinan PC sah yang lama mati
+
+	def test_revoked_device_rejects_both_current_and_previous_tokens(self):
+		dev, old = self.pair()
+		self.rotate_now()
+		ScanDevice.objects.update(is_active=False)
+		self.assertEqual(self.beat().status_code, 401)
+		self.client.cookies['mdi_kiosk'] = old
+		self.assertEqual(self.beat().status_code, 401)
+
+	def test_rotation_guard_against_concurrent_requests(self):
+		dev, old = self.pair()
+		stale = ScanDevice.objects.get()
+		first = svc.rotate_device(ScanDevice.objects.get())
+		self.assertIsNotNone(first)
+		self.assertIsNone(svc.rotate_device(stale))                                # proses lain sudah memutar: tidak menimpa
+		self.assertEqual(ScanDevice.objects.get().key_sha256, svc.hash_key(first))
+
+	def test_current_used_at_is_updated_at_most_once_a_minute(self):
+		dev, key = self.pair()
+		svc.authenticate_device(key)
+		with CaptureQueriesContext(connection) as q:
+			svc.authenticate_device(key)
+		self.assertEqual(sum(1 for x in q.captured_queries if x['sql'].startswith('UPDATE')), 0)
+
+	def test_header_key_for_api_clients_still_works(self):
+		key = svc.new_device_key()
+		ScanDevice.objects.create(name='API', key_sha256=svc.hash_key(key), rotated_at=timezone.now())
+		self.client.cookies.clear()
+		self.assertEqual(self.client.get(reverse('qr-kiosk-check'), HTTP_X_KIOSK_KEY=key).status_code, 200)
+
+	def test_devices_page_explains_ip_check_is_off(self):
+		u = User.objects.create_user('dv', password='x')
+		u.groups.add(Group.objects.get_or_create(name='admin')[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		html = self.client.get(reverse('qr-devices')).content.decode()
+		self.assertIn('Cek IP dimatikan karena IP kantor bisa berganti', html)
+		self.assertNotIn('name="cidr"', html)                                      # formulir jaringan disembunyikan
+		with override_settings(ATTENDANCE_NETWORK_MODE='allowlist'):
+			html = self.client.get(reverse('qr-devices')).content.decode()
+			self.assertIn('name="cidr"', html)

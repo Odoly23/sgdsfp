@@ -16,7 +16,7 @@ attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
 attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
 attendance/management/commands/prune_scanlogs.py   pembersih log scan
-attendance/tests_qr.py         162 tes otomatis
+attendance/tests_qr.py         180 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -53,7 +53,11 @@ ATTENDANCE_TIME_ZONE = 'Asia/Dili'      # zona waktu absensi saja; TIME_ZONE pro
 ATTENDANCE_DEFAULT_LANG = 'tet'         # tet | en | id | pt
 ATTENDANCE_LANG_IN_NAVBAR = False       # True setelah bendera ditempel di navbar (bagian 4)
 # --- keamanan (bawaan sudah ketat; ubah hanya bila perlu)
-# ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']   # bawaan: semua jaringan privat. [] = TERBUKA (tidak aman)
+# ATTENDANCE_NETWORK_MODE = 'device'      # 'device' (bawaan): penjaga = PC kiosk terpasang, cocok untuk IP berganti (Starlink)
+#                                         # 'allowlist': scan juga wajib dari IP/jaringan terdaftar (untuk IP kantor tetap)
+# ATTENDANCE_DEVICE_ROTATE_HOURS = 6      # token PC kiosk diputar otomatis tiap sekian jam
+# ATTENDANCE_DEVICE_GRACE_HOURS = 24      # token lama masih diterima sekian jam bila Set-Cookie tidak sampai
+# ATTENDANCE_KIOSK_ALLOWED_IPS = ['192.168.1.0/24']   # hanya mode 'allowlist'. Bawaan: jaringan privat. [] = TERBUKA
 # ATTENDANCE_REQUIRE_DEVICE_KEY = True    # scan hanya dari PC yang dipasangkan admin (bawaan True)
 # ATTENDANCE_ALLOW_CAMERA = False         # kamera cadangan di kiosk (bawaan mati: hanya alat pembaca QR)
 # ATTENDANCE_TRUST_PROXY_HEADER = True    # True bila server di belakang Nginx/proxy lokal tepercaya
@@ -81,10 +85,21 @@ ATTENDANCE_CARD_CONTACT = 'Telp ...'    # baris kontak di belakang kartu (string
 Dengan `ATTENDANCE_QR_SECRET` terpisah, kartu tetap aman walau `SECRET_KEY` diganti. Isi dengan string acak panjang
 dan jangan diubah setelah kartu dicetak.
 
-**Jaringan kantor (`ATTENDANCE_KIOSK_ALLOWED_IPS`):** bawaannya hanya jaringan privat (192.168.x.x, 10.x.x.x, 172.16-31.x.x,
-localhost). Pegawai di rumah memakai alamat publik, jadi scan mereka ditolak walau memegang kartu dan punya fotonya.
-Persempit ke jaringan kantor Anda saja bila perlu, misalnya `['192.168.1.0/24']`. Mengisi `[]` membuka scan dari seluruh
-internet dan memunculkan peringatan merah.
+**Mode penjagaan (`ATTENDANCE_NETWORK_MODE`):**
+- `'device'` (bawaan): scan hanya sah dari **PC kiosk yang dipasangkan admin**. Alamat IP tidak diperiksa, sehingga IP kantor
+  boleh berganti-ganti (Starlink residensial memakai CGNAT: IP publik dibagi banyak pelanggan dan sering berganti). Dari rumah
+  tetap mustahil: perangkat di rumah tidak punya token PC kiosk. HP pegawai yang tersambung ke Wi-Fi kantor juga tidak bisa
+  walau IP-nya sama dengan PC kiosk, karena tanpa token.
+- `'allowlist'`: selain PC terpasang, scan juga wajib datang dari IP/jaringan terdaftar (jaringan privat bawaan, ditambah
+  IP kantor yang didaftarkan admin). Cocok bila kantor punya **IP publik tetap** atau server berada di jaringan kantor.
+  Mengisi `ATTENDANCE_KIOSK_ALLOWED_IPS = []` pada mode ini membuka scan dari seluruh internet (muncul peringatan merah).
+- Bila `ATTENDANCE_REQUIRE_DEVICE_KEY = False`, cek IP otomatis kembali dipakai sebagai pengaman (tidak boleh tanpa penjaga).
+
+**Token PC kiosk berputar otomatis:** denyut kiosk (tiap 30 detik) mengganti token di browser PC itu tiap
+`ATTENDANCE_DEVICE_ROTATE_HOURS` (6 jam). Cookie yang disalin ke perangkat lain menjadi basi setelah itu; bila token lama dipakai
+**setelah** PC sah memakai token baru, sistem menyimpulkan ada salinan: PC itu **dicabut otomatis**, tercatat di `ScanLog`, dan
+halaman Hari ini menampilkan peringatan merah untuk admin (pasangkan ulang bila itu PC Anda). Jika Set-Cookie tidak sampai karena
+koneksi putus, PC sah tetap diterima selama masa tenggang (24 jam) dan tokennya diperbaiki sendiri.
 
 **Di belakang Nginx/proxy:** server hanya melihat alamat proxy, jadi alamat asli pegawai tidak diketahui. Karena itu,
 **bila ada header `X-Forwarded-For` tetapi `ATTENDANCE_TRUST_PROXY_HEADER` belum True, scan ditolak** (gagal-aman) dan
@@ -153,7 +168,7 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
 
 1. Colok alat pembaca QR USB ke PC pintu (mode "keyboard/HID", akhiran Enter, bawaan hampir semua alat). Tanpa driver.
 2. Di **PC pintu itu**, login sebagai `admin` → **Perangkat kiosk** → **Jadikan PC ini kiosk**. Satu klik, tanpa mengetik
-   kunci. Di VPS/internet, biarkan kotak "Izinkan juga IP kantor ini" tercentang (lihat bagian 7). Server membuat kunci acak, hanya sidik SHA-256-nya yang disimpan, dan kunci aslinya dititipkan ke browser PC itu
+   kunci. Server membuat kunci acak, hanya sidik SHA-256-nya yang disimpan, dan kunci aslinya dititipkan ke browser PC itu
    sebagai cookie `HttpOnly` (tidak bisa dibaca JavaScript, hanya terkirim ke `/attendance/qr/`).
 3. Buka `/attendance/qr/kiosk/` di browser yang sama, layar penuh (F11), lalu logout dari akun admin. Selesai: tidak
    perlu klik atau fokus. Di kiri bawah ada "Server terhubung" dan "Scanner terdeteksi" (hijau setelah scan pertama).
@@ -185,13 +200,19 @@ Kalau mau topbar sedikit lebih gelap supaya teks putih lebih terbaca, pakai `#c8
 
 ## 7. Deploy di VPS dengan cPanel
 
-**Hal terpenting:** di VPS, server tidak melihat alamat lokal kantor (192.168.x.x), melainkan **IP publik kantor**. Karena itu
-bawaan "hanya jaringan privat" akan menolak semua scan sampai IP publik kantor didaftarkan. Cukup sekali, dari PC kantor:
-login `admin` → **Perangkat kiosk**. Halaman itu menampilkan "IP browser ini (terlihat oleh server)" dan statusnya.
-Centang **Izinkan juga IP kantor ini** lalu klik **Jadikan PC ini kiosk**: PC dipasangkan dan IP kantor terdaftar sekaligus.
-Bila IP kantor berubah (IP dinamis), kiosk menampilkan "Di luar jaringan kantor"; ulangi dari PC kantor (30 detik) atau
-tambahkan rentang tetap dari ISP. Daftar bisa dinonaktifkan seketika. Rentang yang terlalu luas (lebih besar dari /16)
-ditolak agar tidak sengaja membuka scan ke seluruh internet.
+**Kantor memakai Starlink dan access point.** Dua akibatnya:
+1. Starlink residensial memakai CGNAT: IP publik yang dilihat VPS dibagi banyak pelanggan dan sering berganti. Karena itu bawaan
+   adalah mode `'device'` (tanpa cek IP); penjaganya PC kiosk terpasang dengan token berputar (lihat bagian 3). Tidak ada kerja
+   tambahan saat IP berganti: kiosk tetap jalan.
+2. Access point membuat semua perangkat kantor (PC, HP, laptop) tampil dengan IP yang sama, jadi IP memang tidak bisa
+   membedakan PC kiosk dari HP pegawai. Token PC kiosk yang membedakannya.
+
+Bila suatu hari kantor berlangganan **IP publik tetap** (paket bisnis Starlink atau ISP lain), Anda boleh beralih ke
+`ATTENDANCE_NETWORK_MODE = 'allowlist'` sebagai lapisan tambahan. Di mode itu server melihat **IP publik kantor** (bukan
+192.168.x.x), sehingga IP itu harus didaftarkan: login `admin` di PC kantor → **Perangkat kiosk** → "IP browser ini (terlihat oleh
+server)" → **Izinkan IP ini** (atau centang "Izinkan juga IP kantor ini" saat memasangkan PC). Pada IPv6 yang didaftarkan adalah
+rentang /64 karena alamat sementara berganti-ganti. Rentang yang lebih besar dari /16 ditolak agar tidak sengaja membuka scan ke
+seluruh internet.
 
 ### Menyiapkan aplikasi
 1. cPanel → **Setup Python App** → Python 3.9 atau lebih baru (3.8 tetap didukung) → *Application root* folder proyek,
@@ -251,7 +272,8 @@ Cek hasilnya di halaman **Perangkat kiosk** dari PC kantor: alamat yang tampil h
 ### Bila ada masalah
 | Gejala | Penyebab biasa | Perbaikan |
 |---|---|---|
-| Kiosk: "Di luar jaringan kantor" padahal di kantor | IP publik kantor belum terdaftar atau berganti; atau proxy belum dipercaya | Perangkat kiosk → lihat IP yang tampil → Izinkan IP ini |
+| Kiosk: "Di luar jaringan kantor" padahal di kantor | Hanya terjadi di mode `allowlist`: IP publik kantor belum terdaftar/berganti, atau proxy belum dipercaya | Pakai mode `'device'` (bawaan), atau Perangkat kiosk → Izinkan IP ini |
+| Peringatan merah "PC kiosk dicabut otomatis" | Token lama dipakai setelah token baru: cookie PC kiosk mungkin disalin | Selidiki; bila itu PC Anda sendiri, pasangkan ulang di Perangkat kiosk |
 | Kiosk: "PC ini belum dipasangkan" | Belum dipasangkan, cookie terhapus, atau situs dibuka lewat `http` setelah dipasangkan lewat `https` | Pasangkan lagi; selalu pakai `https` (aktifkan HSTS) |
 | Formulir admin: 403 CSRF | `CSRF_TRUSTED_ORIGINS` belum memuat `https://domain` | Tambahkan, restart |
 | 500 setelah deploy | `migrate` belum dijalankan (tabel baru) | `python manage.py migrate` |
@@ -338,8 +360,8 @@ Dari rumah scan gagal walau memegang kartu atau fotonya.
 | Lapis | Perlindungan |
 |---|---|
 | Kartu | QR berisi `MDI.<id>.<versi>.<HMAC-SHA256>`; tidak ada token yang disimpan. Dipalsukan = ditolak. Hilang → **Ganti QR** (versi naik, kartu lama langsung mati). Kartu lama tidak menampilkan nama pemiliknya di kiosk |
-| Jaringan | Hanya jaringan privat bawaan dan IP kantor yang didaftarkan admin (VPS); rentang terlalu luas ditolak; header proxy dari klien tidak dipercaya, dan koneksi dari proxy lokal yang tidak dipercaya = ditolak (gagal-aman) |
-| PC kiosk | Cookie `HttpOnly`, `SameSite=Strict`, `Secure` di HTTPS, dibatasi ke `/attendance/qr/`; hanya SHA-256 kunci yang disimpan; bisa dicabut seketika |
+| Jaringan | Mode `device` (bawaan): IP tidak diperiksa, penjaga PC terpasang. Mode `allowlist`: IP/jaringan terdaftar, rentang terlalu luas ditolak; header proxy dari klien tidak dipercaya, proxy lokal tak tepercaya = ditolak (gagal-aman). Tanpa pemasangan PC, cek IP otomatis wajib |
+| PC kiosk | Cookie `HttpOnly`, `SameSite=Strict`, `Secure` di HTTPS, dibatasi ke `/attendance/qr/`; hanya SHA-256 token yang disimpan; **token diputar otomatis tiap 6 jam, salinan terdeteksi dan PC dicabut otomatis**; bisa dicabut seketika oleh admin |
 | Permintaan scan | Wajib header `X-Kiosk: 1` dan JSON (formulir lintas situs tidak bisa), ukuran dibatasi 1 KB, 60 permintaan/menit per alamat IP, masukan dibatasi panjang dan karakternya sebelum diperiksa |
 | Hak akses | Login + keanggotaan salah satu grup (bukan hanya grup pertama); tidak berhak = HTTP 403; semua tombol yang mengubah data wajib POST dan token CSRF |
 | Data pegawai | Pegawai hanya melihat datanya sendiri (id tidak pernah diterima dari browser); endpoint JSON mengembalikan 401/403 berupa JSON dan tidak di-cache |
