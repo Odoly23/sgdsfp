@@ -16,7 +16,7 @@ attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
 attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
 attendance/management/commands/prune_scanlogs.py   pembersih log scan
-attendance/tests_qr.py         180 tes otomatis
+attendance/tests_qr.py         183 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -179,6 +179,31 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
 Mencabut PC kiosk (hilang/diganti): **Perangkat kiosk** → **Nonaktifkan**; PC itu langsung tidak bisa scan.
 Memasangkan ulang di browser yang sama otomatis mematikan pemasangan lamanya. Kamera sengaja mati (hanya alat pembaca QR
 yang dipakai); nyalakan dengan `ATTENDANCE_ALLOW_CAMERA = True` bila perlu, dan butuh HTTPS.
+
+## Alat pembaca QR USB genggam
+
+Alat yang dipakai: pembaca QR/barcode 2D USB genggam (kabel USB, bekerja seperti keyboard). Cara pakainya: pegawai membawa
+**kartu tanda pengenal** (sisi depan: foto dan data diri tanpa QR; **sisi belakang: QR**), lalu mengarahkan sisi belakang ke alat.
+Alat berbunyi, dan layar kiosk menampilkan foto serta nama pemilik kartu. Satu QR = satu pegawai: bila memakai QR milik teman,
+yang tercatat adalah temannya.
+
+**Pengaturan alat** (lewat barcode konfigurasi di buku panduan alat), sekali saja:
+| Pengaturan | Nilai |
+|---|---|
+| Mode antarmuka | **USB HID Keyboard** (bukan Virtual COM/serial) |
+| Simbologi | **QR Code** aktif |
+| Akhiran | Enter (CR). Tab atau tanpa akhiran juga terbaca |
+| Caps Lock | Tidak masalah: huruf besar/kecil dianggap sama |
+| Awalan/AIM ID/karakter kontrol | Boleh; diabaikan oleh kiosk |
+| Kecepatan ketik | Sedang atau cepat |
+
+**Uji 30 detik:** buka Notepad di PC pintu, scan sisi belakang kartu. Harus muncul teks seperti `MDI.12.1.9f3a…` (32 karakter
+akhir) lalu baris baru. Bila muncul tetapi kiosk menjawab "QR tidak dikenal", kartunya yang rusak atau salah cetak (cetak ulang
+lewat **Kartu QR**; "Ganti QR" hanya bila kartu hilang). Bila tidak ada teks sama sekali, alat belum diatur ke HID Keyboard.
+
+**Cetak kartu:** gunakan hasil cetak **doff/matte**. Laminasi mengilap memantulkan cahaya alat dan membuat QR sulit terbaca. Biarkan
+ukuran QR 31 mm dan jaga dari goresan. Kartu ini kartu pegawai buatan sistem ini; QR pada KTP-el pemerintah memiliki isi lain
+dan tidak dikenali kiosk.
 
 ## 6. Topbar: ganti MCI-HRMS menjadi MDI-HRMS dan warna merah MDI
 

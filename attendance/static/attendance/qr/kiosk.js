@@ -128,15 +128,16 @@
 
 	/* ---------- alat pembaca QR (USB): langsung jalan tanpa fokus ----------
 	   Pembaca bekerja seperti keyboard: mengetik kode sangat cepat lalu Enter. Semua tombol ditangkap di sini, jadi
-	   tidak perlu mengklik apa pun. Ketikan manusia (lambat) dibuang. Tanpa Enter pun, kode berbentuk
-	   MDI.x.y.<32 hex> dikirim otomatis setelah jeda singkat. */
+	   tidak perlu mengklik apa pun. Ketikan manusia (lambat) dibuang. Alat berakhiran Tab atau tanpa akhiran pun terbaca:
+	   kode berbentuk MDI.x.y.<32 hex> dikirim otomatis setelah jeda singkat. */
 	var buf = '', lastKey = 0, idleTimer = null, scannerSeen = false;
-	var CODE_RE = /^MDI\.\d+\.\d+\.[0-9a-f]{32}$/;
+	var CODE_RE = /MDI\.\d+\.\d+\.[0-9a-f]{32}(?![0-9a-z])/i;      // tanpa membedakan huruf: Caps Lock; awalan/akhiran alat diabaikan
 	function flush() {
 		var v = buf; buf = ''; clearTimeout(idleTimer);
 		if (!v) return;
 		scannerSeen = true; renderChips();
-		send(v);
+		var m = v.match(CODE_RE);
+		send(m ? m[0] : v);
 	}
 	document.addEventListener('keydown', function (ev) {
 		if (ev.ctrlKey || ev.metaKey || ev.altKey) return;

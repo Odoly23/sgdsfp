@@ -1222,10 +1222,34 @@ class SecurityTests(QRBase):
 		sig = self.payload.split('.')[3]
 		hostile = ['MDI.1.1.' + 'é' * 32, 'MDI.1.1.' + '١' * 32, 'MDI.١٢.1.' + sig,
 				   'MDI.' + '9' * 5000 + '.1.' + sig, 'MDI.1.' + '9' * 40 + '.' + sig, 'MDI.1.1.' + sig + 'x', 'MDI.1.1.',
-				   'MDI..1.' + sig, 'MDI.-1.1.' + sig, 'MDI.1.1.' + sig + '\x00', '\x00' * 50, 'M' * 5000, b'MDI', 12345, None, ['x']]
+				   'MDI..1.' + sig, 'MDI.-1.1.' + sig, '\x00' * 50, 'MDI.1.1.' + sig[:-1], 'MDI.1.1.' + sig + 'a', 'MDI.1.1.' + sig + 'Z', 'M' * 5000, b'MDI', 12345, None, ['x']]
 		for raw in hostile:
 			self.assertIsNone(svc.parse_payload(raw), repr(raw)[:60])
 		self.assertEqual(svc.parse_payload(self.payload), (self.emp.pk, 1))
+
+	def test_scanner_quirks_are_tolerated(self):
+		"""Alat pembaca USB: Caps Lock membalik huruf, awalan pengenal simbologi, akhiran Tab/CR/LF, karakter kontrol."""
+		p = self.payload
+		sig = p.split('.')[3]
+		ok = [p.upper(), p.lower(), 'mdi.%d.1.%s' % (self.emp.pk, sig.upper()), p.swapcase(), ']Q1' + p, p + '\t', p + '\r\n',
+			  '\x02' + p + '\x03', '  ' + p + '  ', ']Q1' + p.upper() + '\r', '\n' + p, p + '\x00']
+		for raw in ok:
+			self.assertEqual(svc.parse_payload(raw), (self.emp.pk, 1), repr(raw))
+		bad = [p.replace(p[-1], '0' if p[-1] != '0' else '1'), p.upper().replace('.1.', '.2.', 1), 'MDI.%d.1.%s' % (self.emp.pk + 1, sig.upper()),
+			   p + 'x', p[:-1], 'X' + p[1:], p.replace('MDI', 'MID')]
+		for raw in bad:
+			self.assertIsNone(svc.parse_payload(raw), repr(raw))
+
+	def test_uppercase_scan_with_junk_is_recorded_like_a_normal_scan(self):
+		r = self.scan(MON, 8, payload=']Q1' + self.payload.upper() + '\t')
+		self.assertEqual((r['ok'], r['code']), (True, 'in'))
+		self.assertEqual(Attendance.objects.get().employee_id, self.emp.pk)
+
+	def test_kiosk_javascript_extracts_the_code_ignoring_case_and_junk(self):
+		import pathlib
+		js = (pathlib.Path(__file__).parent / 'static' / 'attendance' / 'qr' / 'kiosk.js').read_text(encoding='utf-8')
+		self.assertIn('/i;', js)                                               # tanpa membedakan huruf besar/kecil
+		self.assertIn('v.match(CODE_RE)', js)                                   # hanya isi QR yang dikirim, awalan/akhiran dibuang
 
 	def test_non_ascii_qr_through_api_is_a_normal_rejection_not_a_500(self):
 		self.pair()

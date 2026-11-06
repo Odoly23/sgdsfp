@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import ipaddress
 import logging
+import re
 import secrets
 import time
 try:
@@ -105,20 +106,22 @@ def make_payload(card):
 	return '{}.{}.{}.{}'.format(QR_PREFIX, card.employee_id, card.version, _sign(card.employee_id, card.version))
 
 
+# Bentuk isi QR. Alat pembaca USB di lapangan sering menambah awalan/akhiran (mis. "]Q1" pengenal simbologi, Tab, CR/LF,
+# karakter kontrol) dan Caps Lock bisa membalik huruf besar/kecil, jadi isi QR dicari di dalam teks yang diterima dan
+# dibandingkan tanpa membedakan huruf besar/kecil. Keamanan tetap dari tanda tangan HMAC (tidak berubah).
+_PAYLOAD_RE = re.compile(r'MDI\.(\d{1,18})\.(\d{1,9})\.([0-9a-f]{32})(?![0-9a-z])', re.IGNORECASE)
+
+
 def parse_payload(raw):
 	"""Mengembalikan (employee_id, version) kalau tanda tangan benar, selain itu None.
-	Masukan berasal dari pihak tak tepercaya: dibatasi panjang dan karakternya sebelum dihitung."""
+	Masukan berasal dari pihak tak tepercaya: dibatasi panjang dan bentuknya sebelum dihitung."""
 	if not isinstance(raw, str) or len(raw) > 200:
 		return None
-	parts = raw.strip().split('.')
-	if len(parts) != 4 or parts[0] != QR_PREFIX:
+	m = _PAYLOAD_RE.search(raw)
+	if not m or not (m.group(1) + m.group(2) + m.group(3)).isascii():
 		return None
-	if not (parts[1].isascii() and parts[1].isdigit() and parts[2].isascii() and parts[2].isdigit()):
-		return None
-	if len(parts[1]) > 18 or len(parts[2]) > 9 or len(parts[3]) != 32 or not parts[3].isascii():
-		return None
-	emp_id, version = int(parts[1]), int(parts[2])
-	if not hmac.compare_digest(parts[3].encode('ascii'), _sign(emp_id, version).encode('ascii')):
+	emp_id, version, sig = int(m.group(1)), int(m.group(2)), m.group(3).lower()
+	if not hmac.compare_digest(sig.encode('ascii'), _sign(emp_id, version).encode('ascii')):
 		return None
 	return emp_id, version
 
