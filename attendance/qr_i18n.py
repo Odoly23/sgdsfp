@@ -425,6 +425,8 @@ MESSAGES = {
 	'legend.flag': ('⚑ scan barak iha tempu badak, presiza verifika', '⚑ several cards in seconds, needs checking',
 		'⚑ beberapa kartu dalam hitungan detik, perlu dicek', '⚑ vários cartões em segundos, a verificar'),
 	'csv.flag': ('Presiza verifika', 'Needs checking', 'Perlu dicek', 'A verificar'),
+	'forbidden.msg': ('Ita la iha lisensa atu loke pájina ne\'e.', 'You are not allowed to open this page.',
+		'Anda tidak berhak membuka halaman ini.', 'Não tem permissão para abrir esta página.'),
 }
 
 # daftar kunci yang dikirim ke JavaScript kiosk

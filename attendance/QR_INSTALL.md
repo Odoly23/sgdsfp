@@ -16,7 +16,7 @@ attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
 attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
 attendance/management/commands/prune_scanlogs.py   pembersih log scan
-attendance/tests_qr.py         202 tes otomatis
+attendance/tests_qr.py         207 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -25,7 +25,7 @@ attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jp
 
 **`attendance/models.py`** (paling bawah):
 ```python
-from attendance.models_qr import QRCard, ScanDevice, AttendanceTime, ScanLog  # noqa
+from attendance.models_qr import QRCard, ScanDevice, AttendanceTime, ScanLog, OfficeNetwork  # noqa
 ```
 
 **`attendance/urls.py`** (pastikan `include` diimpor, lalu tambah satu baris di `urlpatterns`):
@@ -43,7 +43,7 @@ python manage.py migrate
 python manage.py collectstatic          # wajib: DEBUG=False memakai WhiteNoise
 python manage.py test attendance.tests_qr
 ```
-Migrasi hanya membuat 4 tabel baru. Kolom di tabel `Attendance` yang ada tidak diubah.
+Migrasi hanya membuat 5 tabel baru. Kolom di tabel `Attendance` yang ada tidak diubah.
 
 ## 3. Pengaturan (`settings.py`) — semuanya opsional, tapi dua yang pertama sangat disarankan
 
@@ -139,6 +139,21 @@ Tombol itu membuka **Hari ini**; dari sana ada tombol ke Rekap, Kartu QR, dan Pe
 ```
 Hasilnya dropdown **RELATORIU → Tabular / Grafiku** (4 bahasa). Tujuannya otomatis mengikuti grup:
 admin, staff, president ke dashboard seluruh pegawai; funsionario dan employee ke laporan absensinya sendiri.
+
+**Bila menu RELATORIU sudah ada** (dropdown Anda sendiri), jangan pakai `_navbar_report.html`; tempel isinya saja
+ke dalam dropdown itu:
+```html
+{% include 'attendance/qr/_navbar_report_items.html' %}
+```
+
+**Nama grup berbeda?** Bila di proyek grupnya bukan `staff` (mis. `staff1`), set di `settings.py`
+`ATTENDANCE_MANAGER_GROUPS`, `ATTENDANCE_VIEWER_GROUPS`, `ATTENDANCE_DEVICE_GROUPS`, `ATTENDANCE_SELF_GROUPS`
+(daftar nama grup). Periksa dengan:
+```bash
+python manage.py attendance_check_groups
+```
+Pengguna tanpa izin mendapat halaman 403; bila proyek punya `home/403.html`, itu yang dipakai, bila tidak,
+`attendance/qr/403.html`.
 
 **Tombol di Varanda (home)**, besar dan mudah diketuk di HP:
 ```html

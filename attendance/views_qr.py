@@ -32,6 +32,9 @@ from attendance.models_qr import AttendanceTime, OfficeNetwork, QRCard, ScanDevi
 
 # ============================================================ akses
 
+# Halaman 403 milik proyek dipakai bila ada; bila tidak, halaman cadangan bawaan (agar tidak jadi error 500).
+FORBIDDEN_TEMPLATES = ('home/403.html', 'attendance/qr/403.html')
+
 def qr_access(groups_setting):
 	"""Login + keanggotaan grup (salah satu grup pengguna, bukan hanya yang pertama). Tidak berhak = HTTP 403.
 	`groups_setting` adalah nama setelan, mis. 'VIEWER_GROUPS', dibaca saat permintaan sehingga mudah diubah."""
@@ -41,7 +44,7 @@ def qr_access(groups_setting):
 			if not request.user.is_authenticated:
 				return redirect_to_login(request.get_full_path())
 			if not svc.in_groups(request.user, svc.conf(groups_setting)):
-				return render(request, 'home/403.html', status=403)
+				return render(request, FORBIDDEN_TEMPLATES, status=403)
 			return fn(request, *args, **kwargs)
 		return inner
 	return deco

@@ -2069,3 +2069,68 @@ class BurstTests(QRBase):
 		self.assertNotIn('f-flag', html)
 		self.assertNotIn('⚑', html)
 		self.assertNotIn('Perlu dicek', html)
+
+
+class ProjectCompatibilityTests(QRBase):
+	"""Hal-hal yang bergantung pada proyek asli (template 403, menu RELATORIU yang sudah ada, nama grup)."""
+
+	def login(self, group):
+		u = User.objects.create_user('pc_' + group, password='x')
+		u.groups.add(Group.objects.get_or_create(name=group)[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+
+	def test_403_falls_back_to_builtin_page_when_project_has_none(self):
+		from attendance import views_qr
+		self.login('funsionario')
+		with mock.patch.object(views_qr, 'FORBIDDEN_TEMPLATES', ('tidak/ada.html', 'attendance/qr/403.html')):
+			r = self.client.get(reverse('qr-cards'))
+		self.assertEqual(r.status_code, 403)
+		self.assertContains(r, 'Anda tidak berhak membuka halaman ini', status_code=403)
+
+	def test_403_prefers_the_project_template(self):
+		self.login('funsionario')
+		r = self.client.get(reverse('qr-cards'))                                # harness memiliki home/403.html
+		self.assertContains(r, '<h1>403</h1>', status_code=403)
+		self.assertNotContains(r, 'Anda tidak berhak', status_code=403)
+
+	def test_items_snippet_fits_inside_an_existing_relatoriu_dropdown(self):
+		from django.template.loader import render_to_string
+		from django.test import RequestFactory
+		for group, tab in [('admin', 'qr-dash'), ('funsionario', 'qr-me')]:
+			u = User.objects.create_user('it_' + group, password='x')
+			u.groups.add(Group.objects.get_or_create(name=group)[0])
+			req = RequestFactory().get('/')
+			req.user = u
+			req.COOKIES['mdi_lang'] = 'tet'
+			html = render_to_string('attendance/qr/_navbar_report_items.html', {}, request=req)
+			self.assertIn('href="%s"' % reverse(tab), html)
+			self.assertIn('dropdown-item', html)
+			self.assertNotIn('<li', html)                                     # hanya isi dropdown, bukan dropdown kedua
+			self.assertNotIn('dropdown-toggle', html)
+
+	def test_check_groups_command_reports_missing_and_unmapped_groups(self):
+		from django.core.management import call_command
+		Group.objects.create(name='admin')
+		g = Group.objects.create(name='staff1')
+		u = User.objects.create_user('s1', password='x')
+		u.groups.add(g)
+		out = io.StringIO()
+		call_command('attendance_check_groups', stdout=out)
+		text = out.getvalue()
+		self.assertIn('OK       admin', text)
+		self.assertIn('TIDAK ADA staff', text)                                  # 'staff' bawaan tidak ada di basis data
+		self.assertIn('staff1 (1)', text)                                       # grup nyata yang belum diberi hak
+		self.assertIn('ATTENDANCE_*_GROUPS', text)
+		with override_settings(ATTENDANCE_MANAGER_GROUPS=['admin', 'staff1'], ATTENDANCE_VIEWER_GROUPS=['admin', 'staff1'],
+							   ATTENDANCE_DEVICE_GROUPS=['admin'], ATTENDANCE_SELF_GROUPS=['admin', 'staff1']):
+			out = io.StringIO()
+			call_command('attendance_check_groups', stdout=out)
+		self.assertIn('Semua grup ditemukan', out.getvalue())
+
+	def test_custom_group_names_grant_access(self):
+		with override_settings(ATTENDANCE_MANAGER_GROUPS=['admin', 'staff1'], ATTENDANCE_VIEWER_GROUPS=['admin', 'staff1']):
+			self.login('staff1')
+			self.assertEqual(self.client.get(reverse('qr-cards')).status_code, 200)
+			self.assertEqual(self.client.get(reverse('qr-today')).status_code, 200)
+			self.assertEqual(self.client.get(reverse('qr-devices')).status_code, 403)       # hak perangkat tetap admin saja
