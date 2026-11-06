@@ -10,6 +10,7 @@ urlpatterns = [
 	path('lang/<str:code>/', v.set_lang, name="qr-lang"),
 
 	path('today/', v.today, name="qr-today"),
+	path('today/review/<int:pk>/', v.scan_review, name="qr-scan-review"),
 
 	path('devices/', v.devices, name="qr-devices"),
 	path('devices/pair/', v.device_pair, name="qr-device-pair"),

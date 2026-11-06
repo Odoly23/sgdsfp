@@ -11,7 +11,7 @@
 				<span class="badge badge-danger" title="{% t 'th.absent' %}">{{ r.totals.absent }}</span>
 			</div>
 		</div>
-		{% include 'attendance/qr/_cal.html' %}
+		{% include 'attendance/qr/_cal.html' with show_flag=True %}
 	</div>
 {% empty %}<p class="text-muted">{% t 'grid.empty' %}</p>
 {% endfor %}

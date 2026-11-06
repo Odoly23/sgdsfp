@@ -1880,3 +1880,192 @@ class DeviceTokenTests(QRBase):
 		with override_settings(ATTENDANCE_NETWORK_MODE='allowlist'):
 			html = self.client.get(reverse('qr-devices')).content.decode()
 			self.assertIn('name="cidr"', html)
+
+
+class BurstTests(QRBase):
+	"""Scan beruntun (satu orang menscan beberapa kartu): ditandai untuk dicek admin, tidak pernah diblokir."""
+
+	def setUp(self):
+		super().setUp()
+		self.B = self.make_employee('Jose', 'Costa')
+		self.C = self.make_employee('Ana', 'Lopes')
+		self.D = self.make_employee('Joao', 'Pereira')
+		self.cards = {e.pk: svc.make_payload(QRCard.objects.create(employee=e)) for e in (self.B, self.C, self.D)}
+		self.cards[self.emp.pk] = self.payload
+
+	def scan_emp(self, emp, seconds, device=None, date=MON):
+		now = at(date, 8, 0) + datetime.timedelta(seconds=seconds)
+		return svc.process_scan(self.cards[emp.pk], device=device, now=now)
+
+	def flagged_ids(self):
+		return set(AttendanceTime.objects.filter(flagged=True).values_list('attendance__employee_id', flat=True))
+
+	def test_three_people_in_six_seconds_are_flagged_but_still_recorded(self):
+		r1, r2, r3 = self.scan_emp(self.emp, 0), self.scan_emp(self.B, 2), self.scan_emp(self.C, 4)
+		self.assertEqual([r['code'] for r in (r1, r2, r3)], ['in', 'in', 'in'])           # tidak ada yang diblokir
+		self.assertEqual([r.get('flag') for r in (r1, r2, r3)], [None, None, 'burst'])
+		self.assertEqual(self.flagged_ids(), {self.emp.pk, self.B.pk, self.C.pk})          # ketiganya ditandai di laporan
+		self.assertEqual(Attendance.objects.count(), 3)
+		self.assertEqual(list(ScanLog.objects.order_by('id').values_list('flag', flat=True)), ['', '', 'burst'])
+
+	def test_a_fourth_card_keeps_being_flagged_inside_the_window(self):
+		for emp, sec in [(self.emp, 0), (self.B, 1), (self.C, 2)]:
+			self.scan_emp(emp, sec)
+		self.assertEqual(self.scan_emp(self.D, 3).get('flag'), 'burst')
+		self.assertEqual(self.flagged_ids(), {self.emp.pk, self.B.pk, self.C.pk, self.D.pk})
+
+	def test_a_normal_queue_is_not_flagged(self):
+		for emp, sec in [(self.emp, 0), (self.B, 4), (self.C, 8), (self.D, 12)]:           # tiap orang ~4 detik
+			self.assertIsNone(self.scan_emp(emp, sec).get('flag'))
+		self.assertEqual(self.flagged_ids(), set())
+		self.assertEqual(self.scan_emp(self.emp, 30).get('flag'), None)                    # scan pulang jauh kemudian
+
+	def test_two_people_close_together_are_fine(self):
+		self.scan_emp(self.emp, 0)
+		self.assertIsNone(self.scan_emp(self.B, 1).get('flag'))
+		self.assertEqual(self.flagged_ids(), set())
+
+	def test_the_same_person_scanning_repeatedly_is_not_a_burst(self):
+		self.scan_emp(self.emp, 0)
+		self.assertEqual(self.scan_emp(self.emp, 1)['code'], 'duplicate')
+		self.assertEqual(self.scan_emp(self.emp, 2)['code'], 'duplicate')
+		self.assertEqual(self.flagged_ids(), set())
+
+	def test_rejected_scans_do_not_count(self):
+		for emp, sec in [(self.emp, 0), (self.B, 1), (self.C, 2)]:
+			self.assertEqual(self.scan_emp(emp, sec, date=SUN)['code'], 'holiday')          # akhir pekan: semuanya ditolak
+		self.assertEqual(self.flagged_ids(), set())
+		self.assertEqual(ScanLog.objects.exclude(flag='').count(), 0)
+
+	def test_kiosks_are_counted_separately(self):
+		d1 = ScanDevice.objects.create(name='A', key_sha256=svc.hash_key('a'))
+		d2 = ScanDevice.objects.create(name='B', key_sha256=svc.hash_key('b'))
+		self.scan_emp(self.emp, 0, d1)
+		self.scan_emp(self.B, 1, d1)
+		self.assertIsNone(self.scan_emp(self.C, 2, d2).get('flag'))                        # PC lain: tidak digabung
+		self.assertEqual(self.scan_emp(self.D, 3, d1).get('flag'), 'burst')                # PC pertama sudah 3 orang
+
+	def test_window_rolls_forward(self):
+		self.scan_emp(self.emp, 0)
+		self.scan_emp(self.B, 2)
+		self.assertIsNone(self.scan_emp(self.C, 20).get('flag'))
+		self.assertIsNone(self.scan_emp(self.D, 21).get('flag'))
+		self.assertEqual(self.scan_emp(self.B, 22).get('flag'), None)                          # B sudah masuk: duplicate/already_in, tidak dihitung
+		self.assertEqual(self.flagged_ids(), set())
+
+	@override_settings(ATTENDANCE_BURST_COUNT=0)
+	def test_can_be_turned_off(self):
+		for emp, sec in [(self.emp, 0), (self.B, 1), (self.C, 2), (self.D, 3)]:
+			self.assertIsNone(self.scan_emp(emp, sec).get('flag'))
+		self.assertEqual(self.flagged_ids(), set())
+
+	@override_settings(ATTENDANCE_BURST_COUNT=2, ATTENDANCE_BURST_SECONDS=10)
+	def test_thresholds_are_configurable(self):
+		self.scan_emp(self.emp, 0)
+		self.assertEqual(self.scan_emp(self.B, 9).get('flag'), 'burst')
+
+	def test_detection_costs_no_database_query_without_a_burst(self):
+		self.scan_emp(self.emp, 0)
+		with CaptureQueriesContext(connection) as q:
+			self.scan_emp(self.B, 30)
+		self.assertEqual(sum(1 for x in q.captured_queries if 'scanlog' in x['sql'] and x['sql'].startswith('SELECT')), 0)
+		self.assertEqual(sum(1 for x in q.captured_queries if x['sql'].startswith('UPDATE')), 0)
+
+	def test_flag_marks_only_todays_rows(self):
+		self.scan_emp(self.emp, 0, date=MON - datetime.timedelta(days=3))
+		for emp, sec in [(self.B, 0), (self.C, 1), (self.D, 2)]:
+			self.scan_emp(emp, sec)
+		self.assertEqual(self.flagged_ids(), {self.B.pk, self.C.pk, self.D.pk})
+
+	# ---------- layar kiosk
+	def test_kiosk_api_returns_flag_only_on_burst(self):
+		self.pair()
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 8)):
+			out = [self.post_scan({'code': self.cards[e.pk]}).json() for e in (self.emp, self.B, self.C)]
+		self.assertEqual([o.get('flag') for o in out], [None, None, 'burst'])
+		self.assertTrue(all(o['ok'] for o in out))
+
+	def test_kiosk_page_has_recent_strip_and_flag_text_in_all_languages(self):
+		r = self.client.get(reverse('qr-kiosk'))
+		self.assertContains(r, 'id="recent"')
+		bundle = r.context['bundle']
+		for lang in ('tet', 'en', 'id', 'pt'):
+			self.assertIn('k.flag_burst', bundle[lang])
+			self.assertIn('k.recent', bundle[lang])
+		import pathlib
+		js = (pathlib.Path(__file__).parent / 'static' / 'attendance' / 'qr' / 'kiosk.js').read_text(encoding='utf-8')
+		self.assertIn("res.flag === 'burst'", js)
+		self.assertIn('pushRecent', js)
+
+	# ---------- peninjauan admin dan laporan
+	def login(self, group, name=None):
+		u = User.objects.create_user(name or 'b_' + group, password='x')
+		u.groups.add(Group.objects.get_or_create(name=group)[0])
+		self.client.force_login(u)
+		self.client.cookies['mdi_lang'] = 'id'
+		return u
+
+	def make_burst(self):
+		for emp, sec in [(self.emp, 0), (self.B, 1), (self.C, 2)]:
+			self.scan_emp(emp, sec)
+
+	def test_today_shows_flags_count_and_review_button_for_managers(self):
+		self.make_burst()
+		self.login('staff')
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 12)):
+			html = self.client.get(reverse('qr-today')).content.decode()
+		self.assertEqual(html.count('⚑ Perlu dicek</span>'), 3)                            # chip di tiga baris
+		self.assertEqual(html.count('Sudah dicek'), 3)                                     # tombol tinjau
+		self.assertIn('<b>3</b><span>Perlu dicek</span>', html)                            # ubin jumlah
+
+	def test_viewers_see_flags_but_cannot_clear_them(self):
+		self.make_burst()
+		self.login('president')
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 12)):
+			html = self.client.get(reverse('qr-today')).content.decode()
+		self.assertIn('Perlu dicek</span>', html)
+		self.assertNotIn('Sudah dicek', html)
+		st = AttendanceTime.objects.filter(flagged=True).first()
+		self.assertEqual(self.client.post(reverse('qr-scan-review', args=[st.pk])).status_code, 403)
+		self.assertTrue(AttendanceTime.objects.get(pk=st.pk).flagged)
+
+	def test_review_clears_the_flag(self):
+		self.make_burst()
+		self.login('staff')
+		st = AttendanceTime.objects.filter(flagged=True).first()
+		r = self.client.post(reverse('qr-scan-review', args=[st.pk]))
+		self.assertEqual(r.status_code, 302)
+		self.assertFalse(AttendanceTime.objects.get(pk=st.pk).flagged)
+		self.assertEqual(AttendanceTime.objects.filter(flagged=True).count(), 2)
+		self.assertEqual(self.client.get(reverse('qr-scan-review', args=[st.pk])).status_code, 405)
+		self.assertEqual(self.client.post(reverse('qr-scan-review', args=[99999])).status_code, 404)
+		self.client.logout()
+		self.login('funsionario', name='emp1')
+		self.assertEqual(self.client.post(reverse('qr-scan-review', args=[st.pk])).status_code, 403)
+
+	def test_report_counts_and_marks_flagged_days_and_csv_has_a_column(self):
+		self.make_burst()
+		rows = svc.month_report(2026, 11)['rows']
+		by_name = {r['employee']['name']: r for r in rows}
+		self.assertEqual(by_name['Maria Silva']['totals']['flagged'], 1)
+		self.assertTrue(by_name['Maria Silva']['cells'][8]['flag'])
+		self.assertEqual(by_name['Joao Pereira']['totals']['flagged'], 0)
+		self.login('admin')
+		html = self.client.get(reverse('qr-report'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertIn('f-flag', html)                                                      # kalender mini (HP)
+		self.assertIn('rp-flag">⚑', html)                                                  # tabel lebar
+		text = b''.join(self.client.get(reverse('qr-report-export'), {'year': 2026, 'month': 11}).streaming_content).decode('utf-8-sig')
+		header = text.splitlines()[0].split(',')
+		self.assertEqual(header[-1], 'Perlu dicek')
+		self.assertEqual(sum(int(l.split(',')[-1]) for l in text.splitlines()[1:]), 3)
+
+	def test_employees_never_see_flags_about_themselves(self):
+		from employee.models import EmployeeUser
+		self.make_burst()
+		u = self.login('funsionario')
+		EmployeeUser.objects.create(employee=self.emp, user=u)
+		with mock.patch.object(timezone, 'now', lambda: at(MON, 12)):
+			html = self.client.get(reverse('qr-me'), {'year': 2026, 'month': 11}).content.decode()
+		self.assertNotIn('f-flag', html)
+		self.assertNotIn('⚑', html)
+		self.assertNotIn('Perlu dicek', html)

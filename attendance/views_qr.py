@@ -27,7 +27,7 @@ from leave.models import Leaves
 from attendance import qr_i18n as i18n
 from attendance import qr_service as svc
 from attendance.models import Attendance
-from attendance.models_qr import OfficeNetwork, QRCard, ScanDevice, ScanLog
+from attendance.models_qr import AttendanceTime, OfficeNetwork, QRCard, ScanDevice, ScanLog
 
 
 # ============================================================ akses
@@ -216,6 +216,7 @@ def today(request):
 	rows = list(Attendance.objects.filter(date=d, scantime__isnull=False)
 				.select_related('employee', 'div', 'scantime').order_by('-scantime__check_in'))
 	items = [{'att': a, 'in': svc.hhmm(a.scantime.check_in), 'out': svc.hhmm(a.scantime.check_out),
+			  'flagged': a.scantime.flagged, 'st_id': a.scantime.pk,
 			  'early': bool(a.scantime.check_out) and svc.to_local(a.scantime.check_out).time() < svc.conf_time('WORK_END')}
 			 for a in rows]
 	total = active.count()
@@ -223,6 +224,7 @@ def today(request):
 									  employee__in=active).values('employee').distinct().count())
 	have_row = Attendance.objects.filter(date=d, employee__in=active).values('employee').distinct().count()
 	stats = {'total': total, 'scanned': len(items), 'late': sum(1 for a in rows if a.scantime.is_late),
+			 'flagged': sum(1 for a in rows if a.scantime.flagged),
 			 'leave': on_leave, 'waiting': max(total - have_row - on_leave, 0)}
 	logs = ScanLog.objects.select_related('employee', 'device').exclude(code__in=['in', 'in_late', 'out', 'out_early'])[:15]
 	for log in logs:
@@ -236,6 +238,17 @@ def today(request):
 	return render(request, 'attendance/qr/today.html', _page(
 		request, 'today.title', date=d, date_text=i18n.fmt_date(d, lang), stats=stats, items=items, logs=logs, active='today',
 		alerts=alerts, off_text=i18n.reason_text(off[0], off[1], lang) if off else ''))
+
+
+@qr_access('MANAGER_GROUPS')
+@require_POST
+def scan_review(request, pk):
+	"""Admin/staff menandai scan beruntun sebagai sudah dicek (menghapus tanda)."""
+	st = get_object_or_404(AttendanceTime, pk=pk)
+	st.flagged = False
+	st.save(update_fields=['flagged'])
+	messages.success(request, _tr(request, 'msg.reviewed'))
+	return redirect('qr-today')
 
 
 # ============================================================ PC kiosk (pemasangan)
@@ -469,12 +482,12 @@ def _safe_cell(v):
 def _export_rows(rep, lang):
 	t = lambda k: i18n.tr(lang, k)
 	yield ['NRF', t('th.name'), t('th.position'), t('th.division')] + [str(d) for d in rep['days']] + \
-		  [t('th.workdays'), t('th.present'), t('th.late'), t('th.leave'), t('th.absent'), t('csv.noout'), t('csv.early')]
+		  [t('th.workdays'), t('th.present'), t('th.late'), t('th.leave'), t('th.absent'), t('csv.noout'), t('csv.early'), t('csv.flag')]
 	for r in rep['rows']:
 		e, tot = r['employee'], r['totals']
 		cells = [c['code'] + (' (T)' if c['late'] else '') for c in r['cells']]
 		yield [_safe_cell(e['nrf']), _safe_cell(e['name']), _safe_cell(e['position']), _safe_cell(e['division'])] + cells + \
-			  [tot['workdays'], tot['present'], tot['late'], tot['leave'], tot['absent'], tot['no_out'], tot['early']]
+			  [tot['workdays'], tot['present'], tot['late'], tot['leave'], tot['absent'], tot['no_out'], tot['early'], tot['flagged']]
 
 
 class _Echo:

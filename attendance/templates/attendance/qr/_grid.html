@@ -10,7 +10,7 @@
 		{% for c in r.cells %}
 			<td{% if c.in %} title="{% t 'grid.in' %} {{ c.in }}{% if c.out %} · {% t 'grid.out' %} {{ c.out }}{% endif %}"{% endif %}>
 				{% if c.code %}<div class="rp-c rp-{{ c.code }}{% if c.late %} late{% endif %}">{{ c.code }}</div>{% endif %}
-				{% if c.no_out %}<span class="rp-flag">↓</span>{% elif c.early %}<span class="rp-flag">↑</span>{% endif %}
+				{% if c.flag %}<span class="rp-flag">⚑</span>{% elif c.no_out %}<span class="rp-flag">↓</span>{% elif c.early %}<span class="rp-flag">↑</span>{% endif %}
 			</td>
 		{% endfor %}
 		<td>{{ r.totals.workdays }}</td><td><b>{{ r.totals.present }}</b></td><td>{{ r.totals.late }}</td><td>{{ r.totals.leave }}</td><td>{{ r.totals.absent }}</td></tr>

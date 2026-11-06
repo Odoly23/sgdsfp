@@ -16,7 +16,7 @@ attendance/urls_qr.py
 attendance/templatetags/       __init__.py + qr_i18n.py ({% t %}, {% t4 %}, {% flags %}, {% qr_tab_url %}, {% qr_chart_url %})
 attendance/qr_checks.py        pemeriksaan konfigurasi (python manage.py check)
 attendance/management/commands/prune_scanlogs.py   pembersih log scan
-attendance/tests_qr.py         183 tes otomatis
+attendance/tests_qr.py         202 tes otomatis
 attendance/templates/attendance/qr/*
 attendance/static/attendance/qr/*      (qr.css, kiosk.js, charts.js, mdi-logo.jpg)
 ```
@@ -63,6 +63,9 @@ ATTENDANCE_LANG_IN_NAVBAR = False       # True setelah bendera ditempel di navba
 # ATTENDANCE_TRUST_PROXY_HEADER = True    # True bila server di belakang Nginx/proxy lokal tepercaya
 # ATTENDANCE_CLIENT_IP_HEADER = 'HTTP_CF_CONNECTING_IP'   # alamat klien dari header front-end tepercaya (Cloudflare)
 # ATTENDANCE_THROTTLE_PER_MINUTE = 60     # batas scan per alamat IP per menit
+# --- anti titip absen
+# ATTENDANCE_BURST_COUNT = 3              # >= sekian pegawai berbeda ...
+# ATTENDANCE_BURST_SECONDS = 6            # ... dalam sekian detik di PC kiosk yang sama = scan beruntun (0 = mati)
 # --- kecepatan
 # ATTENDANCE_REPORT_CACHE_SECONDS = 60    # cache dashboard/rekap seluruh pegawai (0 = mati)
 # ATTENDANCE_HOLIDAY_CACHE_SECONDS = 60   # cache daftar libur pada jalur scan (0 = mati)
@@ -177,8 +180,30 @@ halaman absensi sehingga tetap bisa dipakai. Layar kiosk selalu punya bendera di
    tanpa margin → cetak depan+belakang → **Tandai sudah dicetak**.
 
 Mencabut PC kiosk (hilang/diganti): **Perangkat kiosk** → **Nonaktifkan**; PC itu langsung tidak bisa scan.
-Memasangkan ulang di browser yang sama otomatis mematikan pemasangan lamanya. Kamera sengaja mati (hanya alat pembaca QR
+Memasangkan ulang di browser yang sama otomatis mematikan pemasangan lamanya. **Pasangkan setiap PC kiosk sendiri-sendiri**: bila cookie yang sama dipakai di dua browser, sistem menganggapnya salinan dan mencabut PC itu. Kamera sengaja mati (hanya alat pembaca QR
 yang dipakai); nyalakan dengan `ATTENDANCE_ALLOW_CAMERA = True` bila perlu, dan butuh HTTPS.
+
+## Anti titip absen: scan beruntun
+
+Satu QR = satu pegawai, jadi QR milik teman mencatat temannya. Cara yang tersisa untuk "titip absen" adalah satu orang
+membawa beberapa kartu (atau foto kartu) dan menscannya berturut-turut. Sistem memberi tahu admin tanpa mengganggu
+pegawai yang jujur:
+- **Deteksi:** bila **3 pegawai berbeda** discan dalam **6 detik** di PC kiosk yang sama (`ATTENDANCE_BURST_COUNT`,
+  `ATTENDANCE_BURST_SECONDS`), semua scan itu **tetap tercatat** (antrean ramai tidak pernah diblokir) tetapi **ditandai**.
+  Orang yang antre lazim membutuhkan sekitar 4 detik per orang, sehingga tidak tertandai; satu orang yang menscan banyak kartu
+  biasanya satu sampai dua detik per kartu.
+- **Layar kiosk:** pemindai melihat baris kuning "Scan beruntun: dicatat untuk dicek admin" (pencegah), dan di bawah hasil ada
+  daftar **5 scan terakhir** beserta nama, sehingga orang di dekat pintu mudah melihat siapa yang baru masuk. Daftar ini hanya
+  di layar, tidak disimpan. Foto pegawai pada layar kiosk diperbesar agar mudah dibandingkan dengan wajah orangnya.
+- **Admin dan staff:** halaman **Hari ini** menampilkan ubin "Perlu dicek", chip ⚑ pada baris yang bersangkutan, dan tombol
+  **Sudah dicek** untuk menghapus tanda. President hanya melihat. Rekap bulanan memberi tanda ⚑ pada harinya (tabel lebar dan
+  kalender mini di HP) dan kolom "Perlu dicek" pada ekspor CSV/Excel.
+- **Privasi:** tanda tidak pernah tampil di laporan pribadi pegawai. Tanda bukan tuduhan, hanya pengingat untuk bertanya
+  ("tadi kamu menscan kartu siapa?"); karena itu tombol **Sudah dicek** menghapusnya.
+- **Ringan:** deteksi memakai cache, tanpa query basis data untuk scan biasa (hanya satu UPDATE saat ada yang ditandai).
+  Dengan banyak proses server, pakai cache berkas bersama (lihat bagian 7) agar scan dari proses berbeda terhitung bersama.
+- **Sengaja tidak dipasang:** foto webcam saat scan. Itu butuh persetujuan pegawai, ruang disk, HTTPS, dan izin kamera, dan
+  menimbulkan masalah privasi baru; bisa ditambahkan kemudian bila kantor memerlukannya.
 
 ## Alat pembaca QR USB genggam
 
@@ -391,6 +416,7 @@ Dari rumah scan gagal walau memegang kartu atau fotonya.
 | Hak akses | Login + keanggotaan salah satu grup (bukan hanya grup pertama); tidak berhak = HTTP 403; semua tombol yang mengubah data wajib POST dan token CSRF |
 | Data pegawai | Pegawai hanya melihat datanya sendiri (id tidak pernah diterima dari browser); endpoint JSON mengembalikan 401/403 berupa JSON dan tidak di-cache |
 | Keluaran | Tidak ada `innerHTML` untuk teks dari server (DOM + `textContent`), semua template di-escape, ekspor CSV/Excel menetralkan injeksi rumus (`=`, `+`, `-`, `@`) |
+| Titip absen | Scan beruntun (3 pegawai dalam 6 detik di satu PC kiosk) ditandai untuk dicek admin tanpa memblokir; kartu hanya berlaku bila tanda tangannya benar dan sisi belakang kartu (QR) hadir fisik di alat |
 | Audit | Setiap scan yang sampai ke server, termasuk yang ditolak, tercatat di `ScanLog` beserta IP; bersihkan berkala dengan `prune_scanlogs` |
 | Konfigurasi | `python manage.py check` memberi peringatan: `QR_SECRET` kosong, jaringan dibuka, pemasangan PC dimatikan, zona waktu/jam/IP tidak valid |
 

@@ -51,6 +51,8 @@ _DEFAULTS = {
 	'REPORT_CACHE_SECONDS': 60,    # cache dashboard/rekap seluruh pegawai; 0 = mati
 	'HOLIDAY_CACHE_SECONDS': 60,   # cache daftar libur untuk jalur scan; 0 = mati
 	'MAX_BODY_BYTES': 1024,        # batas ukuran permintaan scan
+	'BURST_COUNT': 3,              # >= sekian pegawai berbeda ...
+	'BURST_SECONDS': 6,            # ... dalam sekian detik di PC kiosk yang sama = scan beruntun (ditandai, tidak diblokir); 0 = mati
 	'KIOSK_COOKIE': 'mdi_kiosk',
 	'NETWORK_MODE': 'device',      # 'device' = penjaga utama PC kiosk terpasang (cocok untuk IP berganti, mis. Starlink); 'allowlist' = cek IP
 	'DEVICE_ROTATE_HOURS': 6,      # token PC kiosk diputar tiap sekian jam (lewat denyut kiosk)
@@ -444,9 +446,37 @@ def process_scan(raw, device=None, now=None, lang=None, ip=None):
 	now = now or timezone.now()
 	lang = qr_i18n.norm(lang)
 	res = _process(raw, device, now, lang)
+	flag = ''
+	if res['ok'] and res['code'] in SUCCESS_CODES:
+		burst_ids = _burst_ids(device, res['employee_id'], now)
+		if burst_ids:
+			flag = res['flag'] = 'burst'
+			AttendanceTime.objects.filter(attendance__employee_id__in=burst_ids,
+										  attendance__date=to_local(now).date()).update(flagged=True)
+			log.warning('Scan beruntun di PC kiosk "%s": %d pegawai dalam %d detik.',
+						device.name if device else '-', len(burst_ids), conf('BURST_SECONDS'))
 	ScanLog.objects.create(employee_id=res['employee_id'], device=device, scanned_at=now,
-						   code=res['code'], message=res['message'][:200], ip=ip or None)
+						   code=res['code'], message=res['message'][:200], ip=ip or None, flag=flag)
 	return res
+
+
+SUCCESS_CODES = ('in', 'in_late', 'out', 'out_early')
+
+
+def _burst_ids(device, emp_id, now):
+	"""Scan beruntun: satu orang yang menscan beberapa kartu orang lain berturut-turut. Dideteksi dari catatan di cache
+	(tanpa query basis data): >= BURST_COUNT pegawai berbeda dalam BURST_SECONDS di PC kiosk yang sama. Mengembalikan
+	himpunan id pegawai yang terlibat bila terpenuhi. Hanya menandai, tidak pernah memblokir (antrean ramai tetap lancar)."""
+	count, window = conf('BURST_COUNT'), conf('BURST_SECONDS')
+	if not count or not window:
+		return set()
+	ts = now.timestamp()
+	key = 'attqr:recent:%s' % (device.pk if device else 'none')
+	recent = [(t, e) for t, e in (cache.get(key) or []) if 0 <= ts - t <= window][-20:]
+	recent.append((ts, emp_id))
+	cache.set(key, recent, window + 5)
+	ids = {e for _, e in recent}
+	return ids if len(ids) >= count else set()
 
 
 def _process(raw, device, now, lang):
@@ -606,11 +636,11 @@ def month_report(year, month, division=None, employee=None, hol=None):
 	rows = []
 	for e in emps:
 		cells = []
-		tot = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0}
+		tot = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0, 'flagged': 0}
 		for d in days:
 			date = first_day.replace(day=d)
 			cell = {'day': d, 'date': date, 'wd': date.weekday(), 'code': '', 'late': False, 'early': False,
-					'no_out': False, 'in': '', 'out': '', 'holiday': off[d][1][1] if d in off else ''}
+					'no_out': False, 'flag': False, 'in': '', 'out': '', 'holiday': off[d][1][1] if d in off else ''}
 			if d in off:
 				cell['code'] = off[d][0]
 				cells.append(cell)
@@ -626,6 +656,7 @@ def month_report(year, month, division=None, employee=None, hol=None):
 				if st:
 					cell['in'], cell['out'] = hhmm(st.check_in), hhmm(st.check_out)
 					cell['late'] = st.is_late
+					cell['flag'] = st.flagged
 					cell['no_out'] = st.check_out is None and date < today
 					cell['early'] = bool(st.check_out) and to_local(st.check_out).time() < conf_time('WORK_END')
 			elif date < today:
@@ -635,6 +666,7 @@ def month_report(year, month, division=None, employee=None, hol=None):
 				tot['late'] += cell['late']
 				tot['no_out'] += cell['no_out']
 				tot['early'] += cell['early']
+				tot['flagged'] += cell['flag']
 			elif cell['code'] == 'L':
 				tot['leave'] += 1
 			elif cell['code'] == 'F':
@@ -655,7 +687,7 @@ def calendar_weeks(year, month, cells):
 	return [padded[i:i + 7] for i in range(0, len(padded), 7)]
 
 
-_ZERO = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0, 'rate': None}
+_ZERO = {'workdays': 0, 'present': 0, 'late': 0, 'leave': 0, 'absent': 0, 'no_out': 0, 'early': 0, 'flagged': 0, 'rate': None}
 
 
 def year_summary(employee, year):
@@ -671,7 +703,7 @@ def year_summary(employee, year):
 def overview(rep):
 	"""Ringkasan seluruh pegawai dari satu month_report: total, per divisi, tren harian, paling sering terlambat."""
 	rows = rep['rows']
-	keys = ('present', 'late', 'leave', 'absent', 'no_out', 'early')
+	keys = ('present', 'late', 'leave', 'absent', 'no_out', 'early', 'flagged')
 	tot = {k: sum(r['totals'][k] for r in rows) for k in keys}
 	seen = tot['present'] + tot['absent']
 	tot['rate'] = round(100.0 * tot['present'] / seen) if seen else None

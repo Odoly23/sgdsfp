@@ -8,6 +8,7 @@
 <div class="qr-tiles">
 	<div class="qr-tile ok"><b>{{ stats.scanned }}</b><span>{% t 'tile.scanned' %}</span></div>
 	<div class="qr-tile warn"><b>{{ stats.late }}</b><span>{% t 'tile.late' %}</span></div>
+	<div class="qr-tile bad"><b>{{ stats.flagged }}</b><span>{% t 'tile.flagged' %}</span></div>
 	<div class="qr-tile leave"><b>{{ stats.leave }}</b><span>{% t 'tile.leave' %}</span></div>
 	<div class="qr-tile"><b>{{ stats.waiting }}</b><span>{% t 'tile.waiting' %}</span></div>
 	<div class="qr-tile"><b>{{ stats.total }}</b><span>{% t 'tile.total' %}</span></div>
@@ -25,6 +26,9 @@
 			<td data-label="{% t 'th.note' %}">
 				{% if it.att.scantime.is_late %}<span class="badge badge-warning">{% t 'chip.late' %}</span>{% else %}<span class="badge badge-success">{% t 'chip.ontime' %}</span>{% endif %}
 				{% if it.early %}<span class="badge badge-warning">{% t 'chip.early' %}</span>{% endif %}
+				{% if it.flagged %}<span class="badge badge-danger">⚑ {% t 'chip.flag' %}</span>
+					{% if can_manage %}<form method="post" action="{% url 'qr-scan-review' it.st_id %}" class="d-inline">{% csrf_token %}<button class="btn btn-sm btn-mdi" type="submit">{% t 'btn.reviewed' %}</button></form>{% endif %}
+				{% endif %}
 			</td>
 		</tr>
 	{% empty %}<tr><td colspan="5" class="text-muted">{% t 'today.empty' %}</td></tr>

@@ -414,6 +414,17 @@ MESSAGES = {
 		'O PC de quiosque "{name}" foi revogado automaticamente ({time}, IP {ip}): um token antigo foi usado depois do novo — o cookie pode ter sido copiado. Emparelhe novamente se este for o seu PC.'),
 	'res.device_reuse.title': ('PC kiosk kansela', 'Kiosk PC revoked', 'PC kiosk dicabut', 'PC de quiosque revogado'),
 	'res.device_reuse.msg': ('Token tuan uza depois token foun.', 'An old token was used after the new one.', 'Token lama dipakai setelah token baru.', 'Um token antigo foi usado depois do novo.'),
+	# ---------------------------------------------------------------- scan beruntun (anti titip absen)
+	'k.flag_burst': ('Scan kartaun barak iha tempu badak: rejistu ona ba admin atu verifika.', 'Several cards scanned in a few seconds: recorded for the admin to check.',
+		'Beberapa kartu discan dalam beberapa detik: dicatat untuk dicek admin.', 'Vários cartões lidos em poucos segundos: registado para o administrador verificar.'),
+	'k.recent': ('Scan ikus', 'Latest scans', 'Scan terakhir', 'Últimas leituras'),
+	'chip.flag': ('Presiza verifika', 'Needs checking', 'Perlu dicek', 'A verificar'),
+	'tile.flagged': ('Presiza verifika', 'Needs checking', 'Perlu dicek', 'A verificar'),
+	'btn.reviewed': ('Verifika ona', 'Checked', 'Sudah dicek', 'Verificado'),
+	'msg.reviewed': ('Sinál hasai ona.', 'Flag cleared.', 'Tanda dihapus.', 'Sinal removido.'),
+	'legend.flag': ('⚑ scan barak iha tempu badak, presiza verifika', '⚑ several cards in seconds, needs checking',
+		'⚑ beberapa kartu dalam hitungan detik, perlu dicek', '⚑ vários cartões em segundos, a verificar'),
+	'csv.flag': ('Presiza verifika', 'Needs checking', 'Perlu dicek', 'A verificar'),
 }
 
 # daftar kunci yang dikirim ke JavaScript kiosk

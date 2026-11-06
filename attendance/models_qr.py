@@ -43,6 +43,7 @@ class AttendanceTime(models.Model):
 	check_in = models.DateTimeField()
 	check_out = models.DateTimeField(null=True, blank=True)
 	is_late = models.BooleanField(default=False)
+	flagged = models.BooleanField(default=False)          # scan beruntun: perlu dicek admin (bisa dihapus setelah dicek)
 	device = models.ForeignKey(ScanDevice, null=True, blank=True, on_delete=models.SET_NULL)
 
 	def __str__(self):
@@ -58,6 +59,7 @@ class ScanLog(models.Model):
 	code = models.CharField(max_length=20)
 	message = models.CharField(max_length=200, blank=True)
 	ip = models.GenericIPAddressField(null=True, blank=True)
+	flag = models.CharField(max_length=20, blank=True)    # 'burst' bila scan ini bagian dari scan beruntun
 
 	class Meta:
 		ordering = ['-scanned_at']

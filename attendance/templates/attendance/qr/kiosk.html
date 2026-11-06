@@ -25,7 +25,13 @@
 			<div class="k-hint" data-i18n="k.hint">{% t 'k.hint' %}</div>
 			<div class="k-rules" data-i18n="k.rule">{% t 'k.rule' %}</div>
 		</section>
-		<section class="k-result" id="result" aria-live="polite"></section>
+		<div class="k-side">
+			<section class="k-result" id="result" aria-live="polite"></section>
+			<div class="k-recent-box" id="recent-box" hidden>
+				<div class="k-recent-title" data-i18n="k.recent">{% t 'k.recent' %}</div>
+				<ul class="k-recent" id="recent"></ul>
+			</div>
+		</div>
 	</main>
 	<footer class="k-foot">
 		<span>

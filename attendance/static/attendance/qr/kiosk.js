@@ -85,12 +85,31 @@
 			card.appendChild(node('div', 'k-meta', [e.position, e.division].filter(Boolean).join(' · ')));
 		}
 		card.appendChild(node('div', 'k-msg', res.message));
+		if (res.flag === 'burst') card.appendChild(node('div', 'k-flag', '\u2691 ' + t('k.flag_burst')));   // scan beruntun: ditandai
+		pushRecent(res);
 		result.className = 'k-result ' + (['success', 'warn', 'leave', 'info', 'error'].indexOf(res.level) >= 0 ? res.level : 'info');
 		result.replaceChildren(card);
 		beep(SOUND[res.level] || SOUND.info);
 		clearTimeout(hideTimer);
 		hideTimer = setTimeout(idle, (res.level === 'error' || res.level === 'leave') ? 7000 : 4500);
 	}
+	/* daftar scan terakhir (hanya di layar ini, tidak disimpan): orang di dekat pintu mudah melihat siapa saja yang baru scan */
+	var recent = [], recentBox = document.getElementById('recent-box'), recentList = document.getElementById('recent');
+	var EVENTS = ['in', 'in_late', 'out', 'out_early'];
+	function pushRecent(res) {
+		if (!res.ok || !res.employee || EVENTS.indexOf(res.code) < 0) return;
+		recent.unshift({ time: clockEl.textContent.slice(0, 5), name: res.employee.name, flag: res.flag === 'burst' });
+		recent = recent.slice(0, 5);
+		var items = recent.map(function (r) {
+			var li = node('li', r.flag ? 'flag' : '');
+			li.appendChild(node('time', '', r.time));
+			li.appendChild(node('span', '', (r.flag ? '\u2691 ' : '\u2713 ') + r.name));
+			return li;
+		});
+		recentList.replaceChildren.apply(recentList, items);
+		recentBox.hidden = false;
+	}
+
 	function idle() {
 		idleShown = true;
 		result.className = 'k-result';
